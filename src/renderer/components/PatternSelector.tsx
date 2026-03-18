@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from "react";
+import { formatSize } from "../utils/formatters";
 
 interface Pattern {
   id: string;
@@ -15,28 +16,6 @@ interface PatternSelectorProps {
   availablePatterns?: Pattern[];
 }
 
-const PatternChip: React.FC<{
-  pattern: Pattern;
-  selected: boolean;
-  disabled: boolean;
-  onToggle: (id: string) => void;
-  formatSize: (bytes: number) => string;
-}> = ({ pattern, selected, disabled, onToggle, formatSize }) => (
-  <div
-    key={pattern.id}
-    className={`pattern-chip${selected ? " pattern-chip-selected" : ""}${
-      disabled ? " pattern-chip-disabled" : ""
-    }`}
-    onClick={() => !disabled && onToggle(pattern.id)}
-  >
-    <div className="pattern-chip-main">
-      <span className="pattern-chip-label">Pattern {pattern.pattern}</span>
-      <span className="pattern-chip-size">{formatSize(pattern.size)}</span>
-    </div>
-    <div className="pattern-chip-name">{pattern.name}</div>
-    {selected && <span className="pattern-chip-checkmark">✓</span>}
-  </div>
-);
 
 export const PatternSelector: React.FC<PatternSelectorProps> = ({
   selectedPatterns,
@@ -45,22 +24,21 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
   availablePatterns = [],
 }) => {
   const patternsByBank = useMemo(() => {
-    return availablePatterns.reduce((acc, pattern) => {
-      const bankKey = `Bank ${pattern.bank}`;
-      if (!acc[bankKey]) acc[bankKey] = [];
-      acc[bankKey].push(pattern);
+    return availablePatterns.reduce((acc, p) => {
+      const key = `Bank ${p.bank}`;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(p);
       return acc;
     }, {} as Record<string, Pattern[]>);
   }, [availablePatterns]);
 
-  const handlePatternToggle = useCallback(
-    (patternId: string) => {
+  const handleToggle = useCallback(
+    (id: string) => {
       if (disabled) return;
-      const isSelected = selectedPatterns.includes(patternId);
       onPatternSelectionChange(
-        isSelected
-          ? selectedPatterns.filter((id) => id !== patternId)
-          : [...selectedPatterns, patternId]
+        selectedPatterns.includes(id)
+          ? selectedPatterns.filter((x) => x !== id)
+          : [...selectedPatterns, id]
       );
     },
     [disabled, selectedPatterns, onPatternSelectionChange]
@@ -76,85 +54,67 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
     onPatternSelectionChange([]);
   }, [disabled, onPatternSelectionChange]);
 
-  const formatSize = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
   if (availablePatterns.length === 0) {
     return (
-      <div className="md-container">
-        <div className="md-card-header">
-          <h4 className="md-text-title">Patterns</h4>
-        </div>
-        <div className="md-text-body empty-patterns-message">
-          No patterns found. Ensure device is in pattern mode and has patterns
-          to backup.
-        </div>
+      <div style={{ fontSize: 13, fontStyle: "italic", padding: "4px 0" }}>
+        No patterns found. Ensure device is in pattern mode.
       </div>
     );
   }
 
   return (
-    <div className="md-container">
-      <div className="md-card-header">
-        <h4 className="md-text-title">
-          Patterns ({availablePatterns.length} found)
-        </h4>
-        <div className="md-card-actions">
-          <button
-            className="md-button-text"
-            onClick={handleSelectAll}
-            disabled={disabled}
-          >
-            Select All
-          </button>
-          <button
-            className="md-button-text"
-            onClick={handleClearAll}
-            disabled={disabled}
-          >
-            Clear All
-          </button>
-        </div>
-      </div>
-      <div className="pattern-banks">
-        {Object.entries(patternsByBank)
-          .sort()
-          .map(([bankName, patterns]) => (
-            <div key={bankName} className="pattern-bank-section">
-              <div className="pattern-bank-header">
-                <h5 className="md-text-title-small">{bankName}</h5>
-                <span className="pattern-count">
-                  ({patterns.length} patterns)
-                </span>
-              </div>
-              <div className="pattern-grid">
-                {patterns.map((pattern) => (
-                  <PatternChip
-                    key={pattern.id}
-                    pattern={pattern}
-                    selected={selectedPatterns.includes(pattern.id)}
-                    disabled={disabled}
-                    onToggle={handlePatternToggle}
-                    formatSize={formatSize}
-                  />
-                ))}
-              </div>
+    <div>
+      <section className="field-row" style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 13 }}>
+          {availablePatterns.length} patterns found
+        </span>
+        <button className="btn" onClick={handleSelectAll} disabled={disabled}>
+          All
+        </button>
+        <button className="btn" onClick={handleClearAll} disabled={disabled}>
+          None
+        </button>
+      </section>
+
+      {Object.entries(patternsByBank)
+        .sort()
+        .map(([bankName, patterns]) => (
+          <div key={bankName} className="pattern-section">
+            <div className="pattern-section-header">
+              <strong>{bankName}</strong>
+              <span>{patterns.length} patterns</span>
             </div>
-          ))}
-      </div>
+            <div className="pattern-grid">
+              {patterns.map((p) => {
+                const selected = selectedPatterns.includes(p.id);
+                return (
+                  <div
+                    key={p.id}
+                    className={`pattern-chip${selected ? " pattern-chip-selected" : ""}${disabled ? " pattern-chip-disabled" : ""}`}
+                    onClick={() => handleToggle(p.id)}
+                  >
+                    <div className="pattern-chip-main">
+                      <span className="pattern-chip-label">
+                        P{p.pattern}
+                      </span>
+                      <span className="pattern-chip-size">
+                        {formatSize(p.size)}
+                      </span>
+                    </div>
+                    <div className="pattern-chip-name">{p.name}</div>
+                    {selected && (
+                      <span className="pattern-chip-checkmark">✓</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
       {selectedPatterns.length > 0 && (
-        <div className="pattern-selection-info">
-          <div className="md-text-body-small pattern-selection-count">
-            Selected: {selectedPatterns.length} of {availablePatterns.length}{" "}
-            patterns
-          </div>
-          <div className="md-text-body-small pattern-selection-note">
-            Note: Currently all patterns will be backed up. Selective pattern
-            backup coming soon.
-          </div>
+        <div className="selection-info">
+          {selectedPatterns.length} of {availablePatterns.length} selected
         </div>
       )}
     </div>

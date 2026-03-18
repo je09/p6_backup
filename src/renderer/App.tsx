@@ -4,12 +4,21 @@ import {
   BackupResult,
   RestoreResult,
 } from "../shared/types/index";
-import { Header } from "./components/Header";
 import { DeviceStatusCard } from "./components/DeviceStatusCard";
-import { BackupSectionContainer } from "./components/BackupSectionContainer";
+import { BackupSection } from "./components/BackupSection";
 import { RestoreSection } from "./components/RestoreSection";
 import { UserGuide } from "./components/UserGuide";
 import { createComponentLogger } from "./utils/logger";
+import { UI_LABELS } from "../shared/constants";
+import { SnackbarProvider } from "./context/SnackbarContext";
+
+type View = "backup" | "restore" | "guide";
+
+const TABS: Array<{ key: View; label: string }> = [
+  { key: "backup", label: UI_LABELS.NAV_BACKUP },
+  { key: "restore", label: UI_LABELS.NAV_RESTORE },
+  { key: "guide", label: UI_LABELS.NAV_GUIDE },
+];
 
 export const App: React.FC = () => {
   const logger = useMemo(() => createComponentLogger("App"), []);
@@ -21,10 +30,9 @@ export const App: React.FC = () => {
     deviceId: "",
     lastSeen: null,
   });
-  const [currentView, setCurrentView] = useState<
-    "backup" | "restore" | "guide"
-  >("backup");
+  const [currentView, setCurrentView] = useState<View>("backup");
   const [isLoading, setIsLoading] = useState(false);
+  const [isBackupInProgress, setIsBackupInProgress] = useState(false);
 
   useEffect(() => {
     const onStatus = (status: DeviceStatus) => setDeviceStatus(status);
@@ -63,9 +71,10 @@ export const App: React.FC = () => {
     switch (currentView) {
       case "backup":
         return (
-          <BackupSectionContainer
+          <BackupSection
             deviceStatus={deviceStatus}
             onBackupComplete={handleBackupComplete}
+            onBackupInProgressChange={setIsBackupInProgress}
           />
         );
       case "restore":
@@ -83,14 +92,48 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="md-app">
-      <Header currentView={currentView} onViewChange={setCurrentView} />
-      <main className="md-main-content">
-        <div className="md-container">
-          <DeviceStatusCard deviceStatus={deviceStatus} isLoading={isLoading} />
-          {renderCurrentView()}
+    <SnackbarProvider>
+    <div className="app-desktop">
+      <div className="window app-window">
+        <div className="title-bar app-title-bar">
+          <button
+            aria-label="Close"
+            className="close"
+            onClick={() => window.electronAPI.windowClose()}
+          />
+          <h1 className="title">{UI_LABELS.APP_TITLE}</h1>
+          <button aria-label="Minimize" className="resize" onClick={() => window.electronAPI.windowMinimize()} />
         </div>
-      </main>
+        <ul role="menu-bar">
+          {TABS.map((tab) => {
+            const locked = isBackupInProgress && tab.key !== "backup";
+            return (
+              <li
+                key={tab.key}
+                role="menu-item"
+                tabIndex={0}
+                className={[
+                  currentView === tab.key ? "nav-active" : "",
+                  locked ? "nav-locked" : "",
+                ].filter(Boolean).join(" ")}
+                onClick={() => !locked && setCurrentView(tab.key)}
+                onKeyDown={(e) => e.key === "Enter" && !locked && setCurrentView(tab.key)}
+                title={locked ? "Backup in progress — please wait" : undefined}
+              >
+                {tab.label}
+              </li>
+            );
+          })}
+        </ul>
+        <div className="separator" />
+        <div className="main-pane window-pane">
+          <DeviceStatusCard deviceStatus={deviceStatus} isLoading={isLoading} />
+          <div className={currentView === "restore" ? "main-pane-fill" : "main-pane-scroll"}>
+            {renderCurrentView()}
+          </div>
+        </div>
+      </div>
     </div>
+    </SnackbarProvider>
   );
 };

@@ -1,13 +1,9 @@
 import { DeviceMode } from '../types/index';
 
-export const DEVICE_MODES: Record<string, DeviceMode> = {
-    PATTERN_BACKUP: 'pattern',
-    PATTERN_RESTORE: 'pattern',
-    PATTERN_EXPORT: 'pattern',
-    PATTERN_IMPORT: 'pattern',
-    SAMPLE_EXPORT: 'sample',
-    SAMPLE_IMPORT: 'sample',
-    UNKNOWN: 'unknown',
+export const DEVICE_MODES = {
+    PATTERN: 'pattern' as DeviceMode,
+    SAMPLE: 'sample' as DeviceMode,
+    UNKNOWN: 'unknown' as DeviceMode,
 } as const;
 
 export const FILE_PATTERNS = {
@@ -16,6 +12,9 @@ export const FILE_PATTERNS = {
     PATTERN_REGEX: /P6_PTN(\d+)-(\d+)\.PRM/,
     PRM_EXTENSION: '.PRM',
     WAV_EXTENSION: '.WAV',
+    SAMPLE_PREFIX: 'P6_',
+    SAMPLE_EXTENSION: '.WAV',
+    SAMPLE_REGEX: /P6_([A-H])S(\d+)\.WAV/i,
     BANK_PREFIX: 'BANK_',
     PAD_PREFIX: 'PAD_',
     BACKUP_FOLDER: 'BACKUP',
@@ -24,9 +23,11 @@ export const FILE_PATTERNS = {
     IMPORT_FOLDER: 'IMPORT',
     INFO_FILE: 'info.txt',
     INFO_ENTRY_FORMAT: '{bank}-{pad}:\t{name}',
-    VERSION_REGEX: /v?(\d+\.\d+(?:\.\d+)?)/i,
-    VERSION_FILES: ['version.txt', 'firmware.txt', 'info.txt'],
-    SERIAL_FILES: ['serial.txt', 'device.txt', 'info.txt'],
+    CONFIG_FILE: 'config.json',
+    MANIFEST_FILE: 'manifest.json',
+    VERSION_REGEX: /version\s*:\s*([0-9.]+)/i,
+    VERSION_FILES: ['VERSION.DAT', 'SYSINFO.DAT'] as const,
+    SERIAL_FILES: ['EXPLORER.DAT', 'FOLDER.DAT', 'ROLAND', 'SYSINFO.DAT', 'VERSION.DAT'] as const,
 } as const;
 
 export const DEVICE_STATUS = {
@@ -56,15 +57,15 @@ export const DEVICE_DETAILS = {
     UNKNOWN_DEVICE_ID: 'UNKNOWN'
 } as const;
 
-export const MASS_STORAGE_MODE_MAP = {
-    'pattern_backup': DEVICE_MODES.PATTERN_BACKUP,
-    'pattern_restore': DEVICE_MODES.PATTERN_RESTORE,
-    'sample_export': DEVICE_MODES.SAMPLE_EXPORT,
-    'sample_import': DEVICE_MODES.SAMPLE_IMPORT,
-    'pattern_export': DEVICE_MODES.PATTERN_EXPORT,
-    'pattern_import': DEVICE_MODES.PATTERN_IMPORT,
+export const MASS_STORAGE_MODE_MAP: Record<string, DeviceMode> = {
+    'pattern_backup': 'pattern_export',
+    'pattern_restore': 'pattern_import',
+    'sample_export': 'sample_export',
+    'sample_import': 'sample_import',
+    'pattern_export': 'pattern_export',
+    'pattern_import': 'pattern_import',
     'unknown': DEVICE_MODES.UNKNOWN,
-} as const;
+};
 
 export const DATA_TYPES = {
     PATTERNS: 'patterns',

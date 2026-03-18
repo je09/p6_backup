@@ -25,18 +25,12 @@ export const SampleBankSelector: React.FC<SampleBankSelectorProps> = ({
   disabled = false,
   availableBanks = [],
 }) => {
-  // Log props for debugging
   const logger = createComponentLogger("SampleBankSelector");
-  logger.debug("SampleBankSelector props:", {
-    selectedBanks,
-    disabled,
-    availableBanks,
-  });
+  logger.debug("SampleBankSelector props:", { selectedBanks, disabled, availableBanks });
 
-  // If no available banks are specified, allow all banks (for backward compatibility)
   const effectiveAvailableBanks =
     availableBanks.length === 0
-      ? SAMPLE_BANKS.map((bank) => bank.id)
+      ? SAMPLE_BANKS.map((b) => b.id)
       : availableBanks;
   const availableBankSet = React.useMemo(
     () => new Set(effectiveAvailableBanks.map((b) => b.toLowerCase())),
@@ -45,18 +39,17 @@ export const SampleBankSelector: React.FC<SampleBankSelectorProps> = ({
 
   const handleBankToggle = (bankId: string) => {
     if (disabled) return;
-
     const isSelected = selectedBanks.includes(bankId);
-    if (isSelected) {
-      onBankSelectionChange(selectedBanks.filter((id) => id !== bankId));
-    } else {
-      onBankSelectionChange([...selectedBanks, bankId]);
-    }
+    onBankSelectionChange(
+      isSelected
+        ? selectedBanks.filter((id) => id !== bankId)
+        : [...selectedBanks, bankId]
+    );
   };
 
   const handleSelectAll = () => {
     if (disabled) return;
-    onBankSelectionChange(SAMPLE_BANKS.map((bank) => bank.id));
+    onBankSelectionChange(SAMPLE_BANKS.map((b) => b.id));
   };
 
   const handleClearAll = () => {
@@ -65,56 +58,61 @@ export const SampleBankSelector: React.FC<SampleBankSelectorProps> = ({
   };
 
   return (
-    <div className="md-container">
-      <div className="md-card-header">
-        <h4 className="md-text-title">Sample Banks</h4>
-        <div className="md-card-actions">
-          <button className="md-button-text" onClick={handleSelectAll}>
-            Select All
-          </button>
-          <button className="md-button-text" onClick={handleClearAll}>
-            Clear All
-          </button>
-        </div>
-      </div>
-
-      <div className="md-sample-bank-grid">
+    <div>
+      <section className="field-row" style={{ marginBottom: 6 }}>
+        <button className="btn" onClick={handleSelectAll} disabled={disabled}>
+          Select All
+        </button>
+        <button className="btn" onClick={handleClearAll} disabled={disabled}>
+          Clear
+        </button>
+      </section>
+      <div className="bank-grid">
         {SAMPLE_BANKS.map((bank) => {
           const isSelected = selectedBanks.includes(bank.id);
-          const isAvailable = availableBankSet.has(bank.id.toLowerCase());
-          // Use disabled directly
-          const className = [
-            "md-chip",
-            isSelected && "md-chip-selected",
-            disabled && "md-chip-disabled",
-            !isAvailable && "md-chip-unavailable",
-          ]
-            .filter(Boolean)
-            .join(" ");
-
+          const isAvailable = availableBankSet.has(bank.id);
           return (
-            <div
+            <button
               key={bank.id}
-              className={className}
-              onClick={() => !disabled && handleBankToggle(bank.id)}
+              className={`btn${isSelected ? " btn-default" : ""}`}
+              onClick={() => handleBankToggle(bank.id)}
+              disabled={disabled}
               title={
                 !isAvailable
-                  ? "Bank not currently available - mode switching may be required"
-                  : ""
+                  ? "Bank not currently available"
+                  : `${bank.name} (${bank.pairs})`
               }
+              style={!isAvailable ? { opacity: 0.5 } : undefined}
             >
-              <span className="md-chip-label">{bank.name}</span>
-              <span className="md-chip-sublabel">({bank.pairs})</span>
-            </div>
+              {bank.name}
+            </button>
           );
         })}
       </div>
-
       {selectedBanks.length > 0 && (
-        <div className="md-text-body-small">
+        <div style={{ fontSize: 11, marginTop: 4 }}>
           Selected: {selectedBanks.map((id) => id.toUpperCase()).join(", ")}
         </div>
       )}
+      <div className="info-box" style={{ marginTop: 8, fontSize: 13 }}>
+        <p style={{ margin: "0 0 4px" }}>
+          <strong>How to connect your device:</strong>
+        </p>
+        <ul style={{ margin: 0, paddingLeft: 16 }}>
+          <li>
+            Backup: hold <strong>[BANK] + [SAMPLING]</strong> while powering on
+          </li>
+          <li>
+            Restore: hold <strong>[SAMPLING]</strong> while powering on
+          </li>
+          {selectedBanks.some((b) => ["e", "f", "g", "h"].includes(b)) && (
+            <li>
+              Banks E–H require pressing <strong>[SAMPLING]</strong> again — they
+              are handled in a separate session
+            </li>
+          )}
+        </ul>
+      </div>
     </div>
   );
 };

@@ -16,11 +16,7 @@ export interface RestoreResult {
 }
 
 export enum BackupType {
-  PATTERNS = "patterns",
-  SAMPLES_BANK = "samples_bank",
-  SAMPLES_ALL = "samples_all",
-  FULL = "full",
-  COMBINED = "combined",
+  BACKUP = "backup",
 }
 
 export enum OperationStatus {
@@ -74,15 +70,6 @@ export interface SampleBankInfo {
   size: number;
 }
 
-export enum P6Mode {
-  NORMAL = "normal",
-  PATTERN_BACKUP = "pattern_backup", // Play button held - BACKUP folder
-  PATTERN_RESTORE = "pattern_restore", // Record button held - RESTORE folder
-  SAMPLE_EXPORT = "sample_export", // Bank + Sampling button held - EXPORT folder with BANK_<letter>
-  SAMPLE_IMPORT = "sample_import", // Sample button held - IMPORT folder
-  UNKNOWN = "unknown",
-}
-
 export enum SampleBank {
   A = "A",
   B = "B",
@@ -96,8 +83,8 @@ export enum SampleBank {
 
 export interface BackupOperation {
   id: string;
-  type: "pattern" | "sample" | "full";
-  status: "pending" | "in-progress" | "completed" | "failed";
+  type: "backup";
+  status: OperationStatus;
   progress: number;
   message: string;
   startTime: Date;
@@ -108,7 +95,7 @@ export interface BackupOperation {
 export interface RestoreOperation {
   id: string;
   type: "pattern" | "sample";
-  status: "pending" | "in-progress" | "completed" | "failed";
+  status: OperationStatus;
   progress: number;
   message: string;
   sourcePath: string;
@@ -121,7 +108,7 @@ export interface RestoreOperation {
 export interface BackupInfo {
   name: string;
   path: string;
-  type: "patterns" | "samples" | "combined" | "full";
+  type: "backup";
   timestamp: Date;
   itemCount: number;
   size: number;
@@ -130,3 +117,31 @@ export interface BackupInfo {
   sampleBanks: string[];
   description: string;
 }
+
+/** A pattern file read from the device's BACKUP directory. */
+export interface PatternInfo {
+  id: string;
+  bank: number;
+  pattern: number;
+  name: string;
+  path: string;
+  size: number;
+}
+
+/** A single WAV sample entry inside a bank. */
+export interface SampleFileInfo {
+  name: string;
+  path: string;
+  size?: number;
+}
+
+/** Sample data read from a single bank on the device. */
+export interface SampleBankData {
+  bankId: string;
+  samples: SampleFileInfo[];
+}
+
+/** One stage result in an automated backup run. */
+export type BackupStageResult =
+  | { type: "patterns"; result: BackupResult }
+  | { type: "samples"; bank: string; result: BackupResult };

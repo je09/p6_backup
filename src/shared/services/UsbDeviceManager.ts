@@ -1,7 +1,13 @@
 import { SerialPort } from "serialport";
 import * as usb from "usb";
 import { Device } from "usb";
+import { exec as execCb } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, readdirSync } from "fs";
+import * as path from "path";
 import { createComponentLogger } from "./Logger";
+
+const execAsync = promisify(execCb);
 
 export interface UsbDeviceInfo {
   vendorId: number;
@@ -112,9 +118,6 @@ export class UsbDeviceManager {
   private async scanMassStorageDevices(
     devices: UsbDeviceInfo[]
   ): Promise<void> {
-    const { exec } = require("child_process");
-    const util = require("util");
-    const execAsync = util.promisify(exec);
     const platformScans: Record<string, () => Promise<void>> = {
       darwin: async () => {
         try {
@@ -123,7 +126,7 @@ export class UsbDeviceManager {
             .split("\n")
             .filter(Boolean)
             .forEach((volume: string) => {
-              if (volume.includes("P6") || volume.includes("Roland")) {
+              if (volume.includes("P-6")) {
                 devices.push({
                   vendorId: 0x0582,
                   productId: 0x0000,
@@ -210,16 +213,14 @@ export class UsbDeviceManager {
   }
 
   async checkP6MassStorageMode(): Promise<P6MassStorageInfo | null> {
-    const { promises: fs } = require("fs");
-    const path = require("path");
     try {
       const possiblePaths = this.getPossibleP6Paths();
       this.logger.debug("Checking possible P6 paths:", possiblePaths);
       for (const devicePath of possiblePaths) {
         try {
-          const stat = await fs.stat(devicePath);
+          const stat = await fsPromises.stat(devicePath);
           if (stat.isDirectory()) {
-            const contents = await fs.readdir(devicePath);
+            const contents = await fsPromises.readdir(devicePath);
             if (contents.includes("BACKUP"))
               return { path: devicePath, mode: "pattern_backup" };
             if (contents.includes("RESTORE"))
@@ -227,13 +228,19 @@ export class UsbDeviceManager {
             if (contents.includes("EXPORT")) {
               try {
                 const exportPath = path.join(devicePath, "EXPORT");
-                const exportContents = await fs.readdir(exportPath);
-                const banks = exportContents
-                  .filter((f: string) => /^BANK_[A-H]$/i.test(f))
-                  .map((f: string) =>
-                    f.match(/^BANK_([A-H])$/i)?.[1].toUpperCase()
-                  )
-                  .filter(Boolean);
+                const exportContents = await fsPromises.readdir(exportPath);
+                const bankFolders = exportContents.filter((f: string) => /^BANK_[A-H]$/i.test(f));
+                const banks: string[] = [];
+                for (const folder of bankFolders) {
+                  try {
+                    const bankContents = await fsPromises.readdir(path.join(exportPath, folder));
+                    const hasPads = bankContents.some((f: string) => /^PAD_\d+$/i.test(f));
+                    if (hasPads) {
+                      const match = folder.match(/^BANK_([A-H])$/i);
+                      if (match?.[1]) banks.push(match[1].toUpperCase());
+                    }
+                  } catch {}
+                }
                 if (banks.length > 0)
                   return {
                     path: devicePath,
@@ -261,7 +268,6 @@ export class UsbDeviceManager {
     if (process.platform === "darwin") {
       paths.push("/Volumes/P-6");
       try {
-        const { readdirSync } = require("fs");
         readdirSync("/Volumes").forEach((volume: string) => {
           if (
             volume.toLowerCase().includes("p6") ||

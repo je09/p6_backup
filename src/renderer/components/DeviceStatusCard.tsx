@@ -21,7 +21,7 @@ const INITIAL_BANK_INFO: BankInfo = {
 };
 
 const isSampleMode = (mode?: string) =>
-  mode === "sample" || mode === "sample_export" || mode === "sample_import";
+  mode === "sample_export" || mode === "sample_import";
 
 export const DeviceStatusCard: React.FC<DeviceStatusCardProps> = ({
   deviceStatus,
@@ -79,63 +79,58 @@ export const DeviceStatusCard: React.FC<DeviceStatusCardProps> = ({
     return UI_LABELS.NOT_CONNECTED;
   };
 
-  const getStatusColor = () => {
-    if (isLoading) return "warning";
-    return deviceStatus.connected ? "success" : "error";
-  };
+  const dotClass = isLoading
+    ? "loading"
+    : deviceStatus.connected
+    ? "connected"
+    : "disconnected";
 
   return (
-    <div className="md-card">
-      <div className="card-content">
-        <div className={`md-status-indicator md-status-${getStatusColor()}`}>
-          <div className="md-status-dot"></div>
-          <span className="md-text-body">{getStatusText()}</span>
-        </div>
+    <div className="section-block">
+      <div className="status-row">
+        <div className={`status-dot ${dotClass}`} />
+        <span>{getStatusText()}</span>
+      </div>
 
-        {deviceStatus.connected &&
-          isSampleMode(deviceStatus.mode) &&
-          bankInfo.hasBankInfo && (
-            <div className="md-card-section">
-              <div className="md-text-subtitle" style={{ marginBottom: "8px" }}>
-                Sample Bank Information
+      {deviceStatus.connected &&
+        isSampleMode(deviceStatus.mode) &&
+        bankInfo.hasBankInfo && (
+          <div style={{ marginTop: 6, fontSize: 13 }}>
+            {bankInfo.currentBank && (
+              <div><strong>Current Bank:</strong> {bankInfo.currentBank}</div>
+            )}
+            {bankInfo.currentBanks && bankInfo.currentBanks.length > 0 && (
+              <div>
+                <strong>Available Banks:</strong>{" "}
+                {bankInfo.currentBanks.join(", ")}
               </div>
-              {bankInfo.currentBank && (
-                <div className="md-text-body" style={{ marginBottom: "4px" }}>
-                  <strong>Current Bank:</strong> {bankInfo.currentBank}
-                </div>
-              )}
-              {bankInfo.currentBanks && bankInfo.currentBanks.length > 0 && (
-                <div className="md-text-body">
-                  <strong>Available Banks:</strong>{" "}
-                  {bankInfo.currentBanks.join(", ")}
-                </div>
-              )}
-            </div>
-          )}
-
-        {deviceStatus.connected && deviceStatus.mode === "unknown" && (
-          <div className="md-banner">
-            <div className="md-text-body">
-              Device mode unknown. Power off and hold buttons while powering on:
-              <br />• PLAY button = Pattern backup
-              <br />• RECORD button = Pattern restore
-              <br />• BANK + [SAMPLE] = Sample backup
-              <br />• SAMPLE button = Sample restore
-            </div>
-            <div className="md-card-actions" style={{ marginTop: "12px" }}>
-              <button
-                className="md-button md-button-text"
-                onClick={handleRetryModeDetection}
-                disabled={isRetryingMode}
-              >
-                {isRetryingMode
-                  ? "Checking Mode..."
-                  : "Check Device Mode Again"}
-              </button>
-            </div>
+            )}
           </div>
         )}
-      </div>
+
+      {deviceStatus.connected && deviceStatus.mode === "unknown" && (
+        <div className="info-box" style={{ marginTop: 8 }}>
+          <p>Power off and hold while powering on:</p>
+          <p>
+            • <strong>PLAY</strong> = Pattern backup &nbsp;•{" "}
+            <strong>RECORD</strong> = Pattern restore
+            <br />• <strong>BANK + SAMPLING</strong> = Sample backup &nbsp;•{" "}
+            <strong>SAMPLE</strong> = Sample restore
+          </p>
+          <section
+            className="field-row"
+            style={{ justifyContent: "flex-end", marginTop: 8 }}
+          >
+            <button
+              className="btn"
+              onClick={handleRetryModeDetection}
+              disabled={isRetryingMode}
+            >
+              {isRetryingMode ? "Checking…" : "Check Mode Again"}
+            </button>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,85 +1,58 @@
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  DeviceStatus,
-  BackupResult,
-  BackupType,
-} from "../../shared/types/index";
-import { SampleBankSelector } from "./SampleBankSelector";
-import { PatternSelector } from "./PatternSelector";
-import { AutomatedBackupManager } from "./AutomatedBackupManager";
-import { ModeSwitchModal } from "./ModeSwitchModal";
-import { BackupNameModal } from "./BackupNameModal";
-import { Snackbar } from "./Snackbar";
-import {
-  ERROR_MESSAGES,
-  SUCCESS_MESSAGES,
-  STATUS_MESSAGES,
-  INFO_MESSAGES,
-  UI_LABELS,
-  OPERATION_NAMES,
-} from "../../shared/constants";
+import { DeviceStatus, BackupResult } from "../../shared/types/index";
+import { BackupModals } from "./BackupModals";
+import { useSnackbar } from "../context/SnackbarContext";
+import { ERROR_MESSAGES } from "../../shared/constants";
+import { ModeError } from "../../shared/errors/ModeError";
 import { createComponentLogger } from "../utils/logger";
 import { useBackupOrchestration } from "../hooks/useBackupOrchestration";
+import { useBackupState } from "../hooks/useBackupState";
 import { BackupProgressCard } from "./BackupProgressCard";
-import { QuickActionButtons } from "./QuickActionButtons";
-import { CombinedBackupOptions } from "./CombinedBackupOptions";
-import { BankReadinessIndicator } from "./BankReadinessIndicator";
-
-// BankReadinessIndicator moved to its own file
+import { BackupOptions } from "./BackupOptions";
 
 interface BackupSectionProps {
   deviceStatus: DeviceStatus;
   onBackupComplete: (result: BackupResult) => void;
+  onBackupInProgressChange?: (inProgress: boolean) => void;
 }
 
 export const BackupSection: React.FC<BackupSectionProps> = ({
   deviceStatus,
   onBackupComplete,
+  onBackupInProgressChange,
 }) => {
-  // Initialize component logger
   const log = createComponentLogger("BackupSection");
 
-  // Snackbar state
-  const [snackbar, setSnackbar] = useState<{
-    visible: boolean;
-    message: string;
-    type: "success" | "error" | "warning" | "info";
-    action?: { label: string; onClick: () => void };
-  }>({
-    visible: false,
-    message: "",
-    type: "info",
-  });
+  const { showSnackbar } = useSnackbar();
 
-  // Helper function to show snackbar messages
-  const showSnackbar = (
-    message: string,
-    type: "success" | "error" | "warning" | "info",
-    action?: { label: string; onClick: () => void }
-  ) => {
-    setSnackbar({
-      visible: true,
-      message,
-      type,
-      action,
-    });
-  };
+  const [showCompleteDialog, setShowCompleteDialog] = useState(false);
+  const [completeBackupName, setCompleteBackupName] = useState("");
 
-  const hideSnackbar = () => {
-    setSnackbar((prev) => ({ ...prev, visible: false }));
-  };
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  // UI state (keep these local)
-  const [availableBanks, setAvailableBanks] = useState<string[]>([]);
-  const [availablePatterns, setAvailablePatterns] = useState<any[]>([]);
-  const [selectedPatterns, setSelectedPatterns] = useState<string[]>([]);
-  const [includePatterns, setIncludePatterns] = useState(false);
-  const [includeSamples, setIncludeSamples] = useState(false);
-  const [selectedCombinedBanks, setSelectedCombinedBanks] = useState<string[]>(
-    []
+  const showBackupError = useCallback((msg: string) => {
+    setErrorMessage(msg);
+    setShowErrorDialog(true);
+  }, []);
+
+  const {
+    availableBanks,
+    availablePatterns,
+    selectedPatterns,
+    setSelectedPatterns,
+    includePatterns,
+    setIncludePatterns,
+    includeSamples,
+    setIncludeSamples,
+    selectedCombinedBanks,
+    setSelectedCombinedBanks,
+  } = useBackupState(deviceStatus);
+
+  const canBackupPatterns = ["pattern", "pattern_export", "pattern_import"].includes(
+    deviceStatus.mode || ""
   );
 
-  // Mode switching state
   const [showModeSwitchModal, setShowModeSwitchModal] = useState(false);
   const [modeSwitchDetails, setModeSwitchDetails] = useState<{
     currentMode: string;
@@ -88,7 +61,6 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     onContinue: () => void;
   } | null>(null);
 
-  // Backup name modal state
   const [showBackupNameModal, setShowBackupNameModal] = useState(false);
   const [backupNameModalDetails, setBackupNameModalDetails] = useState<{
     title: string;
@@ -96,694 +68,401 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     onConfirm: (customName: string | undefined) => void;
   } | null>(null);
 
-  // Store custom name for automated backup process
-  const [currentBackupCustomName, setCurrentBackupCustomName] = useState<
-    string | undefined
-  >(undefined);
+  const [isDeviceReadyForContinue, setIsDeviceReadyForContinue] =
+    useState(false);
 
-  // Use backup orchestration hook
-  const backupOrchestration = useBackupOrchestration({
+  const handleBackupCompleteWrapped = useCallback((result: BackupResult) => {
+    if (result.success) {
+      const name = result.backupPath ? result.backupPath.split(/[\\/]/).pop() ?? "" : "";
+      setCompleteBackupName(name);
+      setShowCompleteDialog(true);
+    }
+    onBackupComplete(result);
+  }, [onBackupComplete]);
+
+  const {
+    isBackingUp,
+    backupProgress,
+    currentOperation,
+    showBackupGuide,
+    bankQueue,
+    currentBankIndex,
+    backupMode,
+    startBackup,
+    resetProgress,
+    handleContinue,
+    handleCancel,
+  } = useBackupOrchestration({
     deviceStatus,
-    onBackupComplete,
+    onBackupComplete: handleBackupCompleteWrapped,
     showSnackbar,
     log,
   });
 
-  // Fetch available banks when device status changes
   useEffect(() => {
-    const fetchAvailableBanks = async () => {
-      if (
-        deviceStatus.connected &&
-        (deviceStatus.mode === "sample" ||
-          deviceStatus.mode === "sample_export" ||
-          deviceStatus.mode === "sample_import")
-      ) {
-        try {
-          const banks = await window.electronAPI.getCurrentBanks();
-          log.debug("Available banks from API", { banks });
-          if (banks && Array.isArray(banks)) {
-            // Convert banks to lowercase for consistency
-            setAvailableBanks(banks.map((bank) => bank.toLowerCase()));
-            log.debug("Set available banks", {
-              banks: banks.map((bank) => bank.toLowerCase()),
-            });
-          } else {
-            setAvailableBanks([]);
-            log.debug("No banks detected, set available banks to empty array");
-          }
-        } catch (error) {
-          log.error("Failed to fetch available banks", { error });
-          setAvailableBanks([]);
-        }
-      } else {
-        log.debug("Device not in sample mode or not connected", {
-          mode: deviceStatus.mode,
-        });
-        setAvailableBanks([]);
-      }
-    };
-
-    fetchAvailableBanks();
-  }, [deviceStatus.connected, deviceStatus.mode]);
-
-  // Fetch available patterns when device status changes
-  useEffect(() => {
-    const fetchAvailablePatterns = async () => {
-      if (
-        deviceStatus.connected &&
-        (deviceStatus.mode === "pattern" ||
-          deviceStatus.mode === "pattern_export" ||
-          deviceStatus.mode === "pattern_import")
-      ) {
-        try {
-          const patterns = await window.electronAPI.getCurrentPatterns();
-          log.debug("Available patterns from API", { patterns });
-          if (patterns && Array.isArray(patterns)) {
-            setAvailablePatterns(patterns);
-            log.debug("Set available patterns", { count: patterns.length });
-          } else {
-            setAvailablePatterns([]);
-            setSelectedPatterns([]);
-            log.debug(
-              "No patterns detected, set available patterns to empty array"
-            );
-          }
-        } catch (error) {
-          log.error("Failed to fetch available patterns", { error });
-          setAvailablePatterns([]);
-          setSelectedPatterns([]);
-        }
-      } else {
-        log.debug("Device not in pattern mode or not connected", {
-          mode: deviceStatus.mode,
-        });
-        setAvailablePatterns([]);
-        setSelectedPatterns([]);
-      }
-    };
-
-    fetchAvailablePatterns();
-  }, [deviceStatus.connected, deviceStatus.mode, includePatterns]);
-
-  // Auto-select all patterns when available patterns change and patterns are enabled
-  useEffect(() => {
-    if (includePatterns && availablePatterns && availablePatterns.length > 0) {
-      // Only auto-select if no patterns are currently selected
-      if (selectedPatterns.length === 0) {
-        setSelectedPatterns(availablePatterns.map((pattern) => pattern.id));
-        log.debug("Auto-selected all available patterns", {
-          count: availablePatterns.length,
-        });
-      }
-    }
-  }, [availablePatterns, includePatterns]);
-
-  // Add debug logging for device status
-  useEffect(() => {
-    log.debug("Device status changed", deviceStatus);
-    log.debug(
-      `Device is connected: ${deviceStatus.connected}, Mode: ${deviceStatus.mode}`
+    window.electronAPI.onFileCopySuccess((data: { message: string }) =>
+      showSnackbar(data.message, "info")
     );
+    return () => window.electronAPI.removeAllListeners("file-copy-success");
+  }, [showSnackbar]);
 
-    // Log the conditions for enabling sample backup
-    log.debug(
-      `Can backup samples: ${
-        deviceStatus.connected &&
-        (deviceStatus.mode === "sample" ||
-          deviceStatus.mode === "sample_export" ||
-          deviceStatus.mode === "sample_import")
-      }`
-    );
-  }, [deviceStatus]);
-
-  // File copy success event listener
-  useEffect(() => {
-    const handleFileCopySuccess = (data: {
-      fileName: string;
-      message: string;
-    }) => {
-      showSnackbar(data.message, "info");
-    };
-
-    window.electronAPI.onFileCopySuccess(handleFileCopySuccess);
-
-    // Cleanup listener on component unmount
-    return () => {
-      window.electronAPI.removeAllListeners("file-copy-success");
-    };
-  }, []);
-
-  // Simple alias for combined backup with patterns only (no name prompt)
-  const handlePatternBackup = async () => {
-    if (!deviceStatus.connected) {
-      showSnackbar(ERROR_MESSAGES.DEVICE_NOT_CONNECTED, "error");
-      return;
-    }
-
-    // Set combined backup state for patterns only
-    setIncludePatterns(true);
-    setIncludeSamples(false);
-    setSelectedCombinedBanks([]);
-
-    // Select all available patterns for pattern-only backup
-    if (availablePatterns && availablePatterns.length > 0) {
-      setSelectedPatterns(availablePatterns.map((pattern) => pattern.id));
-      log.debug("Auto-selected all patterns for Patterns backup", {
-        count: availablePatterns.length,
-      });
-    }
-
-    // Use automatic naming based on backup type
-    await handleCombinedBackupWithName(undefined);
-  };
-
-  // Simple alias for combined backup with samples only (no name prompt)
-  const handleSampleBackup = async (bankId?: string) => {
-    if (!deviceStatus.connected) {
-      showSnackbar(ERROR_MESSAGES.DEVICE_NOT_CONNECTED, "error");
-      return;
-    }
-
-    // Set combined backup state for samples
-    setIncludePatterns(false);
-    setIncludeSamples(true);
-    // Set specific bank or all banks (a-h)
-    setSelectedCombinedBanks(
-      bankId ? [bankId.toLowerCase()] : ["a", "b", "c", "d", "e", "f", "g", "h"]
-    );
-
-    // Use automatic naming based on backup type
-    await handleCombinedBackupWithName(undefined);
-  };
-
-  // Simple alias for combined backup with both patterns and samples (no name prompt)
-  const handleFullBackup = async () => {
-    if (!deviceStatus.connected) {
-      showSnackbar(ERROR_MESSAGES.DEVICE_NOT_CONNECTED, "error");
-      return;
-    }
-
-    // Set combined backup state for everything
-    setIncludePatterns(true);
-    setIncludeSamples(true);
-    // Set all available banks - use all 8 banks (a-h)
-    setSelectedCombinedBanks(["a", "b", "c", "d", "e", "f", "g", "h"]);
-
-    // Select all available patterns
-    if (availablePatterns && availablePatterns.length > 0) {
-      setSelectedPatterns(availablePatterns.map((pattern) => pattern.id));
-      log.debug("Auto-selected all patterns for Everything backup", {
-        count: availablePatterns.length,
-      });
-    }
-
-    // Use automatic naming based on backup type
-    await handleCombinedBackupWithName(undefined);
-  };
-
-  const handleCombinedBackupWithName = async (customName?: string) => {
-    if (!deviceStatus.connected) {
-      showSnackbar(ERROR_MESSAGES.DEVICE_NOT_CONNECTED, "error");
-      return;
-    }
-
-    if (!includePatterns && !includeSamples) {
-      showSnackbar(
-        "Please select at least one backup type (patterns or samples)",
-        "warning"
-      );
-      return;
-    }
-
-    try {
-      // Check mode requirements for selected options
-      let modeCheckRequired = false;
-      let requiredMode = "";
-      let currentMode = "";
-
-      if (includePatterns) {
-        const patternModeRequirement =
-          await window.electronAPI.checkModeRequirement("pattern backup");
-        if (patternModeRequirement) {
-          modeCheckRequired = true;
-          requiredMode = patternModeRequirement.requiredMode;
-          currentMode = patternModeRequirement.currentMode;
-        }
-      }
-
-      // Note: Sample backup is now available in any mode, so we skip the sample mode check
-
-      if (modeCheckRequired) {
-        // Show mode switch modal
-        const operationDescription =
-          [includePatterns ? "Patterns" : "", includeSamples ? "Samples" : ""]
-            .filter(Boolean)
-            .join(" + ") + " Combined Backup";
-
-        setModeSwitchDetails({
-          currentMode,
-          requiredMode,
-          operation: operationDescription,
-          onContinue: () => performCombinedBackupWithName(customName),
-        });
-        setShowModeSwitchModal(true);
-        return;
-      }
-
-      // Mode is correct, proceed with backup
-      await performCombinedBackupWithName(customName);
-    } catch (error: any) {
-      showSnackbar(error.message || ERROR_MESSAGES.UNKNOWN_ERROR, "error");
-    }
-  };
-
-  const performCombinedBackupWithName = async (customName?: string) => {
-    const operationParts = [];
-    if (includePatterns) operationParts.push("patterns");
-    if (includeSamples) operationParts.push("samples");
-
-    try {
-      // If we need to backup multiple sample banks, use the automated approach
-      if (includeSamples && selectedCombinedBanks.length > 1) {
-        // Start the automated combined backup process
-        await performAutomatedCombinedBackupWithName(customName);
-      } else {
-        // Single operation or single bank - use the simple approach
-        const options = {
-          includePatterns,
-          includeSamples,
-          bankIds:
-            includeSamples && selectedCombinedBanks.length > 0
-              ? selectedCombinedBanks
-              : undefined,
-          customName: customName,
-        };
-
-        const result = await window.electronAPI.combinedBackup(options);
-        onBackupComplete(result);
-
-        if (result.success) {
-          // Removed setTimeout as it's not needed
-        } else {
-          showSnackbar(
-            result.message || ERROR_MESSAGES.FULL_BACKUP_FAILED,
-            "error"
-          );
-        }
-      }
-    } catch (error: any) {
-      if (error.message?.includes("mode")) {
-        // Mode requirement error - this shouldn't happen after modal check, but handle gracefully
-        const [, currentMode, requiredMode] =
-          error.message.match(/Current mode: (\w+).*mode for.*mode: (\w+)/) ||
-          [];
-        if (currentMode && requiredMode) {
-          setModeSwitchDetails({
-            currentMode,
-            requiredMode,
-            operation: "Combined Backup",
-            onContinue: () => performCombinedBackupWithName(customName),
-          });
-          setShowModeSwitchModal(true);
-          return;
-        }
-      }
-      showSnackbar(error.message || ERROR_MESSAGES.UNKNOWN_ERROR, "error");
-    } finally {
-      backupOrchestration.setIsBackupInProgress(false);
-      // Removed backupOrchestration.setCurrentOperation("");
-      backupOrchestration.setBackupProgress(0);
-    }
-  };
-
-  const performAutomatedCombinedBackupWithName = async (
-    customName?: string
-  ) => {
-    // Store the custom name for use in the automated backup process
-    setCurrentBackupCustomName(customName);
-
-    // Initialize the queue and state
-    const bankQueue =
-      selectedCombinedBanks.length > 0 ? selectedCombinedBanks : [];
-    backupOrchestration.setCombinedBackupQueue(bankQueue);
-    backupOrchestration.setCurrentCombinedBankIndex(0);
-    backupOrchestration.setCombinedBackupResults([]);
-
-    // Start with patterns if needed
-    if (includePatterns) {
-      backupOrchestration.setCombinedBackupMode("patterns");
-      // Removed setCurrentOperation as it's not part of the public API
-      backupOrchestration.setShowCombinedBankGuide(true);
-    } else if (includeSamples && bankQueue.length > 0) {
-      // Start with first sample bank
-      backupOrchestration.setCombinedBackupMode("samples");
-      // Removed setCurrentOperation as it's not part of the public API
-      backupOrchestration.setShowCombinedBankGuide(true);
-    } else {
-      // No banks to process
-      throw new Error("No banks selected for combined backup");
-    }
-  };
-
-  const handleCombinedBankContinue = async () => {
-    await backupOrchestration.handleCombinedBankContinue(); // No arguments needed
-  };
-
-  const handleCombinedBankCancel = () => {
-    backupOrchestration.handleCombinedBankCancel();
-    setCurrentBackupCustomName(undefined); // Clear custom name
-  };
-
-  const canBackupPatterns =
-    deviceStatus.connected && deviceStatus.mode === "pattern";
-  const canBackupSamples =
-    deviceStatus.connected &&
-    (deviceStatus.mode === "sample" ||
-      deviceStatus.mode === "sample_export" ||
-      deviceStatus.mode === "sample_import");
-  const canFullBackup = deviceStatus.connected;
-
-  // Check if device is ready for combined backup continue action
-  const [isDeviceReadyForContinue, setIsDeviceReadyForContinue] =
-    useState(false);
-
-  // Helper function to check if device is ready with correct bank
   const checkDeviceReadiness = useCallback(async () => {
     if (!deviceStatus.connected) {
-      log.debug("Device readiness check: Device not connected");
       setIsDeviceReadyForContinue(false);
       return;
     }
-
-    if (backupOrchestration.combinedBackupMode === "patterns") {
-      // For patterns, just check if device is in pattern mode
-      const requiredPatternModes = [
-        "pattern",
-        "pattern_export",
-        "pattern_import",
-      ];
-      const isReady = requiredPatternModes.includes(deviceStatus.mode || "");
-      log.debug(
-        `Pattern readiness check: mode=${deviceStatus.mode}, ready=${isReady}`
+    if (backupMode === "patterns") {
+      const isReady = ["pattern", "pattern_export", "pattern_import"].includes(
+        deviceStatus.mode || ""
       );
       setIsDeviceReadyForContinue(isReady);
-    } else if (backupOrchestration.combinedBackupMode === "samples") {
-      // For samples, check both mode and bank
-      const requiredSampleModes = ["sample", "sample_export", "sample_import"];
-      if (!requiredSampleModes.includes(deviceStatus.mode || "")) {
-        log.debug(`Sample readiness check: wrong mode=${deviceStatus.mode}`);
+    } else if (backupMode === "samples") {
+      if (
+        !["sample", "sample_export", "sample_import"].includes(
+          deviceStatus.mode || ""
+        )
+      ) {
         setIsDeviceReadyForContinue(false);
         return;
       }
-
       try {
         const deviceCurrentBank = await window.electronAPI.getCurrentBank();
-        const targetBank =
-          backupOrchestration.combinedBackupQueue[
-            backupOrchestration.currentCombinedBankIndex
-          ];
-
-        log.debug(
-          `Bank readiness check: targetBank=${targetBank}, deviceBank=${deviceCurrentBank}, index=${backupOrchestration.currentCombinedBankIndex}`
+        const targetBank = bankQueue[currentBankIndex];
+        setIsDeviceReadyForContinue(
+          !!(
+            deviceCurrentBank &&
+            targetBank &&
+            deviceCurrentBank.toLowerCase() === targetBank.toLowerCase()
+          )
         );
-
-        if (deviceCurrentBank && targetBank) {
-          const bankMatches =
-            deviceCurrentBank.toLowerCase() === targetBank.toLowerCase();
-          log.debug(
-            `Bank match check: ${deviceCurrentBank.toLowerCase()} === ${targetBank.toLowerCase()} = ${bankMatches}`
-          );
-          setIsDeviceReadyForContinue(bankMatches);
-        } else {
-          log.debug(
-            `Bank readiness check failed: deviceCurrentBank=${deviceCurrentBank}, targetBank=${targetBank}`
-          );
-          setIsDeviceReadyForContinue(false);
-        }
-      } catch (error) {
-        log.warn("Could not check bank readiness", { error });
+      } catch {
         setIsDeviceReadyForContinue(false);
       }
     } else {
-      log.debug(
-        `Device readiness check: unknown mode=${backupOrchestration.combinedBackupMode}`
-      );
       setIsDeviceReadyForContinue(false);
     }
   }, [
     deviceStatus.connected,
     deviceStatus.mode,
-    backupOrchestration.combinedBackupMode,
-    backupOrchestration.combinedBackupQueue,
-    backupOrchestration.currentCombinedBankIndex,
+    backupMode,
+    bankQueue,
+    currentBankIndex,
   ]);
 
-  // Check device readiness when relevant state changes
   useEffect(() => {
-    if (backupOrchestration.showCombinedBankGuide) {
-      const performCheck = async () => {
-        await checkDeviceReadiness();
-      };
-      performCheck();
-    }
+    if (showBackupGuide) checkDeviceReadiness();
   }, [
     deviceStatus.connected,
     deviceStatus.mode,
-    backupOrchestration.combinedBackupMode,
-    backupOrchestration.currentCombinedBankIndex,
-    backupOrchestration.showCombinedBankGuide,
+    backupMode,
+    currentBankIndex,
+    showBackupGuide,
     checkDeviceReadiness,
   ]);
 
-  // Periodically check bank status when in sample mode
   useEffect(() => {
-    if (
-      backupOrchestration.showCombinedBankGuide &&
-      backupOrchestration.combinedBackupMode === "samples"
-    ) {
-      const interval = setInterval(() => {
-        checkDeviceReadiness();
-      }, 2000); // Check every 2 seconds
-      return () => clearInterval(interval);
+    if (showBackupGuide && backupMode === "samples") {
+      const id = setInterval(checkDeviceReadiness, 2000);
+      return () => clearInterval(id);
     }
-  }, [
-    backupOrchestration.showCombinedBankGuide,
-    backupOrchestration.combinedBackupMode,
-    checkDeviceReadiness,
-  ]);
+  }, [showBackupGuide, backupMode, checkDeviceReadiness]);
 
-  // Mode switching handlers
+  useEffect(() => {
+    onBackupInProgressChange?.(showBackupGuide);
+  }, [showBackupGuide, onBackupInProgressChange]);
+
   const handleModeSwitchCancel = () => {
     setShowModeSwitchModal(false);
     setModeSwitchDetails(null);
   };
 
-  const handleModeSwitchContinue = async () => {
+  const handleModeSwitchContinue = () => {
     if (!modeSwitchDetails) return;
-
     setShowModeSwitchModal(false);
-
-    try {
-      // Wait for the device to be in the required mode
-      const waitResult = await window.electronAPI.waitForMode(
-        modeSwitchDetails.requiredMode
-      );
-
-      if (waitResult.success) {
-        // Execute the original operation
-        modeSwitchDetails.onContinue();
-      } else {
-        showSnackbar(
-          waitResult.timedOut
-            ? "Timeout waiting for device mode switch. Please ensure device is in the correct mode and try again."
-            : "Failed to detect required device mode. Please check device connection and mode.",
-          "error"
-        );
-      }
-    } catch (error: any) {
-      showSnackbar(error.message || "Mode switch failed", "error");
-    } finally {
-      setModeSwitchDetails(null);
-    }
+    const onContinue = modeSwitchDetails.onContinue;
+    setModeSwitchDetails(null);
+    onContinue();
   };
 
-  // Backup Name Modal handlers for cleaner JSX
   const handleBackupNameConfirm = (customName: string | undefined) => {
     setShowBackupNameModal(false);
     backupNameModalDetails?.onConfirm(customName);
     setBackupNameModalDetails(null);
   };
+
   const handleBackupNameCancel = () => {
     setShowBackupNameModal(false);
     setBackupNameModalDetails(null);
   };
 
-  // Helper functions for button text and tooltip
-  const getButtonText = () => {
-    if (backupOrchestration.isBackingUp) return "Backing up...";
-    if (!deviceStatus.connected) return "Device Not Connected";
-    if (!isDeviceReadyForContinue) {
-      if (backupOrchestration.combinedBackupMode === "patterns") {
-        return "Switch to Pattern Mode";
-      } else if (backupOrchestration.combinedBackupMode === "samples") {
-        return `Select Bank ${backupOrchestration.combinedBackupQueue[
-          backupOrchestration.currentCombinedBankIndex
-        ]?.toUpperCase()}`;
+  // Snapshot state at click time to avoid stale closure issues
+  const handleCreateBackup = () => {
+    const snapPatterns = includePatterns;
+    const snapSamples = includeSamples;
+    const snapBanks = selectedCombinedBanks.slice();
+    const snapPatternIds = selectedPatterns.slice();
+    const allBanks = ["a", "b", "c", "d", "e", "f", "g", "h"];
+
+    const doStart = async (customName?: string) => {
+      const resolvedBanks = snapSamples
+        ? snapBanks.length > 0 ? snapBanks : allBanks
+        : [];
+
+      // Patterns-only: use direct backup API — no need for multi-step orchestration
+      if (snapPatterns && !snapSamples) {
+        try {
+          const patternIds = snapPatternIds.length > 0 ? snapPatternIds : undefined;
+          const result = await window.electronAPI.backupPatterns(customName, patternIds);
+          onBackupComplete(result);
+          if (result.success) {
+            setCompleteBackupName(customName ?? "Backup");
+            setShowCompleteDialog(true);
+          } else {
+            showBackupError(result.message || "Backup failed");
+          }
+        } catch (error: any) {
+          const modeInfo = ModeError.fromError(error);
+          if (modeInfo) {
+            setModeSwitchDetails({
+              currentMode: modeInfo.currentMode,
+              requiredMode: modeInfo.requiredMode,
+              operation: "Pattern Backup",
+              onContinue: () => doStart(customName),
+            });
+            setShowModeSwitchModal(true);
+            return;
+          }
+          showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
+        }
+        return;
       }
-      return "Device Not Ready";
-    }
-    return "Continue";
-  };
 
-  // Move mode arrays outside the function to avoid recreation
-  const requiredPatternModes = ["pattern", "pattern_export", "pattern_import"];
-  const requiredSampleModes = ["sample", "sample_export", "sample_import"];
-
-  const getButtonDisabledReason = () => {
-    if (!deviceStatus.connected) return "Device must be connected";
-    if (backupOrchestration.combinedBackupMode === "patterns") {
-      if (!requiredPatternModes.includes(deviceStatus.mode || "")) {
-        return "Device must be in Pattern mode (hold PLAY button while powering on)";
+      // Samples-only with a single bank: use direct API — device is already in sample mode for that bank
+      if (!snapPatterns && snapSamples && resolvedBanks.length === 1) {
+        try {
+          const result = await window.electronAPI.backupSamples(resolvedBanks[0], customName);
+          onBackupComplete(result);
+          if (result.success) {
+            setCompleteBackupName(customName ?? "Backup");
+            setShowCompleteDialog(true);
+          } else {
+            showBackupError(result.message || "Backup failed");
+          }
+        } catch (error: any) {
+          const modeInfo = ModeError.fromError(error);
+          if (modeInfo) {
+            setModeSwitchDetails({
+              currentMode: modeInfo.currentMode,
+              requiredMode: modeInfo.requiredMode,
+              operation: "Sample Backup",
+              onContinue: () => doStart(customName),
+            });
+            setShowModeSwitchModal(true);
+            return;
+          }
+          showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
+        }
+        return;
       }
-    } else if (backupOrchestration.combinedBackupMode === "samples") {
-      if (!requiredSampleModes.includes(deviceStatus.mode || "")) {
-        return "Device must be in Sample mode (hold BANK + SAMPLING buttons while powering on)";
+
+      // Combined or multi-bank samples: use multi-step orchestration
+      try {
+        if (snapPatterns) {
+          startBackup(resolvedBanks, "patterns", customName, snapPatternIds);
+        } else {
+          startBackup(resolvedBanks, "samples", customName);
+        }
+      } catch (error: any) {
+        const modeInfo = ModeError.fromError(error);
+        if (modeInfo) {
+          setModeSwitchDetails({
+            currentMode: modeInfo.currentMode,
+            requiredMode: modeInfo.requiredMode,
+            operation: "Backup",
+            onContinue: () => doStart(customName),
+          });
+          setShowModeSwitchModal(true);
+          return;
+        }
+        showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
+      } finally {
+        resetProgress();
       }
-      return `Device must have bank ${backupOrchestration.combinedBackupQueue[
-        backupOrchestration.currentCombinedBankIndex
-      ]?.toUpperCase()} selected`;
-    }
-    return "Device not ready";
-  };
+    };
 
-  // Destructure snackbar for cleaner usage
-  const { visible, message, type, action } = snackbar;
-
-  // Helper to get backup types and title
-  const getCombinedBackupTypesAndTitle = () => {
-    const backupTypes = [];
-    if (includePatterns) backupTypes.push("Patterns");
-    if (includeSamples) backupTypes.push("Samples");
-    const backupTitle = `${backupTypes.join(" + ")} Combined Backup`;
-    return { backupTypes, backupTitle };
-  };
-
-  // Handler for Create Combined Backup button
-  const handleCreateCombinedBackup = () => {
-    const { backupTypes, backupTitle } = getCombinedBackupTypesAndTitle();
     setBackupNameModalDetails({
-      title: backupTitle,
-      subtitle: `Choose a name for your ${backupTypes
-        .join(" + ")
-        .toLowerCase()} backup`,
-      onConfirm: (customName) => {
+      title: "Backup",
+      subtitle: "Choose a name for your backup",
+      onConfirm: async (customName) => {
         setShowBackupNameModal(false);
-        handleCombinedBackupWithName(customName);
+        if (!deviceStatus.connected) {
+          showSnackbar(ERROR_MESSAGES.DEVICE_NOT_CONNECTED, "error");
+          return;
+        }
+        try {
+          const modeToCheck = snapPatterns ? "pattern backup" : "sample backup";
+          const req = await window.electronAPI.checkModeRequirement(modeToCheck);
+          if (req) {
+            setModeSwitchDetails({
+              currentMode: req.currentMode,
+              requiredMode: req.requiredMode,
+              operation: snapPatterns ? "Pattern Backup" : "Sample Backup",
+              onContinue: () => doStart(customName),
+            });
+            setShowModeSwitchModal(true);
+            return;
+          }
+          doStart(customName);
+        } catch (error: any) {
+          showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
+        }
       },
     });
     setShowBackupNameModal(true);
   };
 
-  // Helper: Render Mode Switch Modal
-  const renderModeSwitchModal = () => {
-    if (!(showModeSwitchModal && modeSwitchDetails)) return null;
-    const { currentMode, requiredMode, operation } = modeSwitchDetails;
-    return (
-      <ModeSwitchModal
-        isOpen={showModeSwitchModal}
-        currentMode={currentMode}
-        requiredMode={requiredMode}
-        operation={operation}
-        onContinue={handleModeSwitchContinue}
-        onCancel={handleModeSwitchCancel}
-      />
-    );
+  const getButtonText = () => {
+    if (isBackingUp) return "Backing up…";
+    if (!deviceStatus.connected) return "Device Not Connected";
+    if (!isDeviceReadyForContinue) {
+      if (backupMode === "patterns") return "Switch to Pattern Mode";
+      if (backupMode === "samples")
+        return `Select Bank ${bankQueue[currentBankIndex]?.toUpperCase()}`;
+      return "Device Not Ready";
+    }
+    return "Continue";
   };
 
-  // Helper: Render Backup Name Modal
-  const renderBackupNameModal = () => {
-    if (!(showBackupNameModal && backupNameModalDetails)) return null;
-    const { title, subtitle } = backupNameModalDetails;
-    return (
-      <BackupNameModal
-        isOpen={showBackupNameModal}
-        title={title}
-        subtitle={subtitle}
-        onConfirm={handleBackupNameConfirm}
-        onCancel={handleBackupNameCancel}
-      />
-    );
+  const getButtonDisabledReason = () => {
+    if (!deviceStatus.connected) return "Device must be connected";
+    if (backupMode === "patterns") {
+      if (!["pattern", "pattern_export", "pattern_import"].includes(deviceStatus.mode || ""))
+        return "Device must be in Pattern mode (hold PLAY while powering on)";
+    } else if (backupMode === "samples") {
+      if (!["sample", "sample_export", "sample_import"].includes(deviceStatus.mode || ""))
+        return "Device must be in Sample mode (hold BANK + SAMPLING while powering on)";
+      return `Device must have bank ${bankQueue[currentBankIndex]?.toUpperCase()} selected`;
+    }
+    return "Device not ready";
   };
-
-  // Helper: Conditional props for Snackbar
-  const getSnackbarActionProps = () => (action ? { action } : {});
 
   return (
-    <div className="backup-layout">
-      {backupOrchestration.isBackupInProgress && (
-        <BackupProgressCard
-          currentOperation={backupOrchestration.currentOperation}
-          backupProgress={backupOrchestration.backupProgress}
-        />
-      )}
-      <QuickActionButtons
-        canBackupPatterns={canBackupPatterns}
-        canFullBackup={canFullBackup}
-        isBackupInProgress={backupOrchestration.isBackupInProgress}
-        onPatternBackup={handlePatternBackup}
-        onSampleBackup={() => handleSampleBackup()}
-        onFullBackup={handleFullBackup}
-        deviceStatus={deviceStatus}
-      />
-      {!backupOrchestration.showCombinedBankGuide && (
-        <div className="advanced-card">
-          <div className="card-header">
-            <div className="card-title">Combined Backup</div>
-            <div className="card-subtitle">
-              Multiple modes in one organized folder
-            </div>
-          </div>
-          <div className="card-content">
-            <CombinedBackupOptions
-              includePatterns={includePatterns}
-              setIncludePatterns={setIncludePatterns}
-              includeSamples={includeSamples}
-              setIncludeSamples={setIncludeSamples}
-              availablePatterns={availablePatterns}
-              selectedPatterns={selectedPatterns}
-              setSelectedPatterns={setSelectedPatterns}
-              canBackupPatterns={canBackupPatterns}
-              isBackupInProgress={backupOrchestration.isBackupInProgress}
-              availableBanks={availableBanks}
-              selectedCombinedBanks={selectedCombinedBanks}
-              setSelectedCombinedBanks={setSelectedCombinedBanks}
-              deviceStatus={deviceStatus}
-              log={log}
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {showBackupGuide && (
+        <div className="section-block">
+          <div className="section-heading">Backup</div>
+          <p className="guide-instruction">{currentOperation}</p>
+          {isBackingUp && (
+            <BackupProgressCard
+              currentOperation={currentOperation}
+              backupProgress={backupProgress}
             />
-          </div>
-          <div className="card-actions">
+          )}
+          <section className="field-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
             <button
-              className="action-button primary"
-              onClick={handleCreateCombinedBackup}
-              disabled={
-                (!includePatterns && !includeSamples) ||
-                backupOrchestration.isBackupInProgress ||
-                !deviceStatus.connected
-              }
+              className="btn btn-default"
+              onClick={handleCancel}
+              disabled={isBackingUp}
             >
-              Create Combined Backup
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={handleContinue}
+              disabled={!isDeviceReadyForContinue || isBackingUp}
+              title={!isDeviceReadyForContinue ? getButtonDisabledReason() : ""}
+            >
+              {getButtonText()}
+            </button>
+          </section>
+        </div>
+      )}
+      {!showBackupGuide && (
+        <div className="section-block">
+          <div className="section-heading">Backup</div>
+          <BackupOptions
+            includePatterns={includePatterns}
+            setIncludePatterns={setIncludePatterns}
+            includeSamples={includeSamples}
+            setIncludeSamples={setIncludeSamples}
+            availablePatterns={availablePatterns}
+            selectedPatterns={selectedPatterns}
+            setSelectedPatterns={setSelectedPatterns}
+            canBackupPatterns={canBackupPatterns}
+            isBackupInProgress={isBackingUp}
+            availableBanks={availableBanks}
+            selectedCombinedBanks={selectedCombinedBanks}
+            setSelectedCombinedBanks={setSelectedCombinedBanks}
+            deviceStatus={deviceStatus}
+            log={log}
+          />
+          <div className="create-backup-footer">
+            <hr className="create-backup-divider" />
+            <button
+              className="btn btn-default create-backup-btn"
+              onClick={handleCreateBackup}
+              disabled={isBackingUp || !deviceStatus.connected || (!includePatterns && !includeSamples)}
+            >
+              Create Backup
             </button>
           </div>
         </div>
       )}
-      {renderModeSwitchModal()}
-      {renderBackupNameModal()}
-      <Snackbar
-        visible={visible}
-        message={message}
-        type={type}
-        onClose={hideSnackbar}
-        {...getSnackbarActionProps()}
+      {showCompleteDialog && (
+        <div className="mac-overlay">
+          <div className="modal-dialog outer-border" style={{ width: "26rem", maxWidth: "90vw" }}>
+            <div className="inner-border">
+              <div className="modal-contents">
+                <h1 className="modal-text">Backup Complete</h1>
+                <p>Your backup has been saved successfully.</p>
+                {completeBackupName && (
+                  <p style={{ fontSize: 12, color: "#555" }}>
+                    Saved as: <strong>{completeBackupName}</strong>
+                  </p>
+                )}
+                <section className="field-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+                  <button
+                    className="btn btn-default"
+                    onClick={() => setShowCompleteDialog(false)}
+                  >
+                    OK
+                  </button>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showErrorDialog && (
+        <div className="mac-overlay">
+          <div className="modal-dialog outer-border" style={{ width: "26rem", maxWidth: "90vw" }}>
+            <div className="inner-border">
+              <div className="modal-contents">
+                <h1 className="modal-text">Backup Failed</h1>
+                <p style={{ marginBottom: 10 }}>{errorMessage}</p>
+                <section className="field-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
+                  <button
+                    className="btn btn-default"
+                    onClick={() => { setShowErrorDialog(false); handleCancel(); }}
+                  >
+                    OK
+                  </button>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      <BackupModals
+        showModeSwitchModal={showModeSwitchModal}
+        modeSwitchDetails={modeSwitchDetails}
+        liveMode={deviceStatus.mode ?? "unknown"}
+        onModeSwitchContinue={handleModeSwitchContinue}
+        onModeSwitchCancel={handleModeSwitchCancel}
+        showBackupNameModal={showBackupNameModal}
+        backupNameModalDetails={backupNameModalDetails}
+        onBackupNameConfirm={handleBackupNameConfirm}
+        onBackupNameCancel={handleBackupNameCancel}
       />
     </div>
   );

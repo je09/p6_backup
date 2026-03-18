@@ -11,28 +11,6 @@ interface BackupNameModalProps {
 
 const sanitizePreview = (name: string) => name.replace(/[<>:"/\\|?*]/g, "_");
 
-const NameOption: React.FC<{
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-  description?: string;
-  children?: React.ReactNode;
-}> = ({ checked, onChange, label, description, children }) => (
-  <div className="name-option">
-    <label className="radio-option">
-      <input
-        type="radio"
-        name="nameOption"
-        checked={checked}
-        onChange={onChange}
-      />
-      <span className="radio-label">{label}</span>
-    </label>
-    {description && <div className="option-description">{description}</div>}
-    {checked && children}
-  </div>
-);
-
 export const BackupNameModal: React.FC<BackupNameModalProps> = ({
   isOpen,
   title,
@@ -52,9 +30,7 @@ export const BackupNameModal: React.FC<BackupNameModalProps> = ({
   };
 
   const handleConfirm = () => {
-    onConfirm(
-      useCustomName && customName.trim() ? customName.trim() : undefined
-    );
+    onConfirm(useCustomName && customName.trim() ? customName.trim() : undefined);
     resetState();
   };
 
@@ -68,69 +44,85 @@ export const BackupNameModal: React.FC<BackupNameModalProps> = ({
     (customName.trim().length > 0 && customName.trim().length <= 100);
 
   return (
-    <div className="md-modal-overlay">
-      <div className="md-card backup-name-modal">
-        <div className="md-card-content">
-          <div className="md-text-headline">{title}</div>
-          {subtitle && <div className="md-text-supporting">{subtitle}</div>}
-          <div className="backup-name-options">
-            <NameOption
-              checked={!useCustomName}
-              onChange={() => setUseCustomName(false)}
-              label="Use automatic naming"
-              description={
-                'Backup will be named with type and timestamp (e.g., "patterns-2025-06-07T10-30-45-123Z")'
-              }
-            />
-            <NameOption
-              checked={useCustomName}
-              onChange={() => setUseCustomName(true)}
-              label="Use custom name"
-            >
-              <div className="custom-name-section">
+    <div className="mac-overlay">
+      <div
+        className="modal-dialog outer-border"
+        style={{ width: "30rem", maxWidth: "90vw" }}
+      >
+        <div className="inner-border">
+          <div className="modal-contents">
+            <h1 className="modal-text">{title}</h1>
+            {subtitle && <p style={{ marginBottom: 10 }}>{subtitle}</p>}
+
+            <div className="name-option-row">
+              <div className="field-row" style={{ marginBottom: 4 }}>
                 <input
-                  type="text"
-                  className="custom-name-input"
-                  value={customName}
-                  onChange={(e) => setCustomName(e.target.value)}
-                  placeholder="Enter backup name..."
-                  maxLength={100}
-                  autoFocus
+                  type="radio"
+                  id="auto-name"
+                  name="nameOption"
+                  checked={!useCustomName}
+                  onChange={() => setUseCustomName(false)}
                 />
-                {customName.trim() && (
-                  <div className="name-preview">
-                    <div className="preview-label">Preview:</div>
-                    <div className="preview-name">
-                      {sanitizePreview(customName.trim())}
-                      -2025-06-07T10-30-45-123Z
-                    </div>
-                  </div>
-                )}
-                <div className="name-rules">
-                  <div className="rule">
-                    • Characters like {'<>:"/\\|?*'} will be replaced with
-                    underscores
-                  </div>
-                  <div className="rule">
-                    • Timestamp will be automatically added for uniqueness
-                  </div>
-                  <div className="rule">• Maximum 100 characters</div>
-                </div>
+                <label htmlFor="auto-name">Use automatic naming</label>
               </div>
-            </NameOption>
+              <div className="name-option-desc">
+                Backup named with type and timestamp (e.g.,
+                &ldquo;patterns-2025-06-07T10-30-45Z&rdquo;)
+              </div>
+            </div>
+
+            <div className="name-option-row">
+              <div className="field-row" style={{ marginBottom: 4 }}>
+                <input
+                  type="radio"
+                  id="custom-name"
+                  name="nameOption"
+                  checked={useCustomName}
+                  onChange={() => setUseCustomName(true)}
+                />
+                <label htmlFor="custom-name">Use custom name</label>
+              </div>
+              {useCustomName && (
+                <div style={{ marginLeft: 22 }}>
+                  <input
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="Enter backup name…"
+                    maxLength={100}
+                    autoFocus
+                    style={{ width: "100%", marginBottom: 6 }}
+                  />
+                  {customName.trim() && (
+                    <div className="name-preview">
+                      {sanitizePreview(customName.trim())}-2025-06-07T10-30-45Z
+                    </div>
+                  )}
+                  <div className="name-rules">
+                    <div>• Special chars will be replaced with underscores</div>
+                    <div>• Timestamp added automatically for uniqueness</div>
+                    <div>• Maximum 100 characters</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <section
+              className="field-row"
+              style={{ justifyContent: "flex-end", marginTop: 12 }}
+            >
+              <button className="btn" onClick={handleCancel}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-default"
+                onClick={handleConfirm}
+                disabled={!isNameValid}
+              >
+                Start Backup
+              </button>
+            </section>
           </div>
-        </div>
-        <div className="md-card-actions">
-          <button
-            className="md-button md-button-text"
-            onClick={handleConfirm}
-            disabled={!isNameValid}
-          >
-            Start Backup
-          </button>
-          <button className="md-button md-button-text" onClick={handleCancel}>
-            Cancel
-          </button>
         </div>
       </div>
     </div>

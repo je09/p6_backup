@@ -7,16 +7,21 @@ import {
   globalShortcut,
 } from "electron";
 import * as path from "path";
+import * as fs from "fs";
 import { BackupService } from "../shared/services/BackupService";
 import { FileSystemService } from "../shared/services/FileSystemService";
+import { BackupDiscoveryService } from "../shared/services/BackupDiscoveryService";
 import { ModeService } from "../shared/services/ModeService";
 import { P6Device } from "../shared/models/P6Device";
+import { UsbDeviceManager } from "../shared/services/UsbDeviceManager";
+import { ModeDetector } from "../shared/services/ModeDetector";
 import { logger, LogLevel } from "../shared/services/Logger";
 
 class MainApplication {
   private mainWindow: BrowserWindow | null = null;
   private backupService: BackupService;
   private fileSystemService: FileSystemService;
+  private backupDiscoveryService: BackupDiscoveryService;
   private modeService: ModeService;
   private p6Device: P6Device;
 
@@ -25,9 +30,12 @@ class MainApplication {
       (event: string, ...args: any[]) =>
         this.mainWindow?.webContents.send(event, ...args)
     );
-    this.backupService = new BackupService(this.fileSystemService);
-    this.p6Device = new P6Device();
+    const usbManager = new UsbDeviceManager();
+    const modeDetector = new ModeDetector(usbManager, { logLevel: "info", enableAutoRetry: true });
+    this.p6Device = new P6Device(usbManager, modeDetector, this.fileSystemService);
     this.modeService = new ModeService(this.p6Device);
+    this.backupService = new BackupService(this.p6Device, this.fileSystemService);
+    this.backupDiscoveryService = new BackupDiscoveryService(this.fileSystemService);
     this.p6Device.onStatusChanged((status) =>
       this.mainWindow?.webContents.send("device:status-changed", status)
     );
@@ -43,10 +51,10 @@ class MainApplication {
         : path.join(__dirname, "../assets/icons/icon-512.png");
     const isDebugging = this.isDebugMode();
     this.mainWindow = new BrowserWindow({
-      height: 800,
-      width: 1200,
-      minHeight: 600,
-      minWidth: 800,
+      height: 580,
+      width: 720,
+      minHeight: 480,
+      minWidth: 600,
       icon: iconPath,
       webPreferences: {
         nodeIntegration: false,
@@ -55,11 +63,13 @@ class MainApplication {
         devTools: isDebugging,
         webSecurity: !isDebugging,
       },
-      titleBarStyle: "hiddenInset",
+      titleBarStyle: "hidden",
+      backgroundColor: "#808080",
       show: false,
     });
+    this.mainWindow.setWindowButtonVisibility(false);
     const indexPath = path.join(__dirname, "../index.html");
-    if (!require("fs").existsSync(indexPath)) {
+    if (!fs.existsSync(indexPath)) {
       logger.error("MainProcess", "index.html file NOT found at expected path");
     }
     this.mainWindow.loadFile(indexPath);
@@ -178,9 +188,13 @@ class MainApplication {
     const handleError = (msg: string) => (error: any) => {
       throw new Error(`${msg}: ${error}`);
     };
-    ipcMain.handle("backup:patterns", async (_, customName?: string) =>
+
+    ipcMain.handle("window:close", () => app.quit());
+    ipcMain.handle("window:minimize", () => this.mainWindow?.minimize());
+
+    ipcMain.handle("backup:patterns", async (_, customName?: string, patternIds?: string[]) =>
       this.backupService
-        .backupPatterns(customName)
+        .backupPatterns(customName, patternIds)
         .catch(handleError("Pattern backup failed"))
     );
     ipcMain.handle(
@@ -190,43 +204,28 @@ class MainApplication {
           .backupSamples(bankId, customName)
           .catch(handleError("Sample backup failed"))
     );
-    ipcMain.handle("backup:full", async (_, customName?: string) =>
-      this.backupService
-        .fullBackup(customName)
-        .catch(handleError("Full backup failed"))
-    );
-    ipcMain.handle("backup:combined", async (_, options) =>
-      this.backupService.combinedBackup(options).catch((error) => {
-        logger.error(
-          "MainProcess",
-          "Combined backup failed",
-          undefined,
-          error as Error
-        );
-        throw new Error(`Combined backup failed: ${error}`);
+    ipcMain.handle("backup:create", async (_, options) =>
+      this.backupService.backup(options).catch((error) => {
+        logger.error("MainProcess", "Backup failed", undefined, error as Error);
+        throw new Error(`Backup failed: ${error}`);
       })
     );
-    ipcMain.handle("backup:organizeCombined", async (_, options) =>
-      this.backupService.organizeCombinedBackup(options).catch((error) => {
-        logger.error(
-          "MainProcess",
-          "Organize combined backup failed",
-          undefined,
-          error as Error
-        );
-        throw new Error(`Organize combined backup failed: ${error}`);
+    ipcMain.handle("backup:organize", async (_, options) =>
+      this.backupService.organizeBackup(options).catch((error) => {
+        logger.error("MainProcess", "Organize backup failed", undefined, error as Error);
+        throw new Error(`Organize backup failed: ${error}`);
       })
     );
-    ipcMain.handle("restore:patterns", async (_, backupPath: string) =>
+    ipcMain.handle("restore:patterns", async (_, backupPath: string, patternIds?: string[]) =>
       this.backupService
-        .restorePatterns(backupPath)
+        .restorePatterns(backupPath, patternIds)
         .catch(handleError("Pattern restore failed"))
     );
     ipcMain.handle(
       "restore:samples",
-      async (_, backupPath: string, bankId?: string) =>
+      async (_, backupPath: string, bankId?: string, sampleNames?: string[]) =>
         this.backupService
-          .restoreSamples(backupPath, bankId)
+          .restoreSamples(backupPath, bankId, sampleNames)
           .catch(handleError("Sample restore failed"))
     );
     ipcMain.handle("device:detect", async () => this.p6Device.detect());
@@ -279,7 +278,7 @@ class MainApplication {
         : null;
     });
     ipcMain.handle("fs:discoverBackups", async () =>
-      this.fileSystemService.discoverBackups().catch((error) => {
+      this.backupDiscoveryService.discoverBackups().catch((error) => {
         logger.error(
           "MainProcess",
           "Failed to discover backups",
@@ -290,7 +289,7 @@ class MainApplication {
       })
     );
     ipcMain.handle("fs:getBackupDetails", async (_, backupPath: string) =>
-      this.fileSystemService.getBackupDetails(backupPath).catch((error) => {
+      this.backupDiscoveryService.getBackupDetails(backupPath).catch((error) => {
         logger.error(
           "MainProcess",
           "Failed to get backup details",
@@ -300,6 +299,19 @@ class MainApplication {
         throw new Error(`Failed to get backup details: ${error}`);
       })
     );
+    ipcMain.handle("fs:renameBackup", async (_, backupPath: string, newName: string) => {
+      const manifestPath = path.join(backupPath, "manifest.json");
+      let manifest: any = {};
+      try {
+        const raw = await fs.promises.readFile(manifestPath, "utf-8");
+        manifest = JSON.parse(raw);
+      } catch {
+        // If manifest doesn't exist, create a minimal one
+      }
+      manifest.displayName = newName;
+      await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+      return backupPath;
+    });
     ipcMain.handle("log:write", async (_, logEntry: any) => {
       try {
         const { level, component, message, data, stack } = logEntry;
@@ -412,6 +424,7 @@ class MainApplication {
     });
     app.on("will-quit", () => {
       this.unregisterGlobalShortcuts();
+      this.p6Device.dispose();
     });
   }
 }

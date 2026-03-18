@@ -3,32 +3,30 @@ import { contextBridge, ipcRenderer } from "electron";
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Backup Operations
-  backupPatterns: (customName?: string) =>
-    ipcRenderer.invoke("backup:patterns", customName),
+  // Backup Operations (staging steps used by orchestration)
+  backupPatterns: (customName?: string, patternIds?: string[]) =>
+    ipcRenderer.invoke("backup:patterns", customName, patternIds),
   backupSamples: (bankId?: string, customName?: string) =>
     ipcRenderer.invoke("backup:samples", bankId, customName),
-  fullBackup: (customName?: string) =>
-    ipcRenderer.invoke("backup:full", customName),
-  combinedBackup: (options: {
+  backup: (options: {
     includePatterns?: boolean;
     includeSamples?: boolean;
     bankIds?: string[];
     customName?: string;
-  }) => ipcRenderer.invoke("backup:combined", options),
-  organizeCombinedBackup: (options: {
+  }) => ipcRenderer.invoke("backup:create", options),
+  organizeBackup: (options: {
     includePatterns?: boolean;
     includeSamples?: boolean;
     bankIds?: string[];
     precompletedResults?: any[];
     customName?: string;
-  }) => ipcRenderer.invoke("backup:organizeCombined", options),
+  }) => ipcRenderer.invoke("backup:organize", options),
 
   // Restore Operations
-  restorePatterns: (backupPath: string) =>
-    ipcRenderer.invoke("restore:patterns", backupPath),
-  restoreSamples: (backupPath: string, bankId?: string) =>
-    ipcRenderer.invoke("restore:samples", backupPath, bankId),
+  restorePatterns: (backupPath: string, patternIds?: string[]) =>
+    ipcRenderer.invoke("restore:patterns", backupPath, patternIds),
+  restoreSamples: (backupPath: string, bankId?: string, sampleNames?: string[]) =>
+    ipcRenderer.invoke("restore:samples", backupPath, bankId, sampleNames),
 
   // Device Operations
   detectDevice: () => ipcRenderer.invoke("device:detect"),
@@ -51,6 +49,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   discoverBackups: () => ipcRenderer.invoke("fs:discoverBackups"),
   getBackupDetails: (backupPath: string) =>
     ipcRenderer.invoke("fs:getBackupDetails", backupPath),
+  renameBackup: (backupPath: string, newName: string) =>
+    ipcRenderer.invoke("fs:renameBackup", backupPath, newName),
 
   // Event Listeners
   onDeviceStatusChanged: (callback: (status: any) => void) => {
@@ -86,6 +86,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.removeAllListeners(channel);
   },
 
+  // Window controls
+  windowClose: () => ipcRenderer.invoke("window:close"),
+  windowMinimize: () => ipcRenderer.invoke("window:minimize"),
+
   // Logging
   sendLog: (logEntry: any) => ipcRenderer.invoke("log:write", logEntry),
   getLogLevel: () => ipcRenderer.invoke("log:getLevel"),
@@ -95,58 +99,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clearLogs: () => ipcRenderer.invoke("log:clear"),
 });
 
-// Type definitions for the exposed API
-declare global {
-  interface Window {
-    electronAPI: {
-      backupPatterns: (customName?: string) => Promise<any>;
-      backupSamples: (bankId?: string, customName?: string) => Promise<any>;
-      fullBackup: (customName?: string) => Promise<any>;
-      combinedBackup: (options: {
-        includePatterns?: boolean;
-        includeSamples?: boolean;
-        bankIds?: string[];
-        customName?: string;
-      }) => Promise<any>;
-      organizeCombinedBackup: (options: {
-        includePatterns?: boolean;
-        includeSamples?: boolean;
-        bankIds?: string[];
-        precompletedResults?: any[];
-        customName?: string;
-      }) => Promise<any>;
-      restorePatterns: (backupPath: string) => Promise<any>;
-      restoreSamples: (backupPath: string, bankId?: string) => Promise<any>;
-      detectDevice: () => Promise<boolean>;
-      getDeviceStatus: () => Promise<any>;
-      getCurrentBanks: () => Promise<string[] | null>;
-      getCurrentBank: () => Promise<string | null>;
-      getCurrentPatterns: () => Promise<any>;
-      hasBankInfo: () => Promise<boolean>;
-      getCurrentMode: () => Promise<string>;
-      checkModeRequirement: (operation: string) => Promise<any>;
-      waitForMode: (requiredMode: string, timeoutMs?: number) => Promise<any>;
-      ejectDevice: () => Promise<boolean>;
-      retryModeDetection: () => Promise<string>;
-      selectBackupLocation: () => Promise<string | null>;
-      selectRestoreFile: () => Promise<string | null>;
-      discoverBackups: () => Promise<any[]>;
-      getBackupDetails: (backupPath: string) => Promise<any>;
-      onDeviceStatusChanged: (callback: (status: any) => void) => void;
-      onMenuAction: (action: string, callback: () => void) => void;
-      onNavigationRequest: (callback: (route: string) => void) => void;
-      onMenuNewBackup: (callback: () => void) => void;
-      onNavigationShowGuide: (callback: () => void) => void;
-      onFileCopySuccess: (
-        callback: (data: { fileName: string; message: string }) => void
-      ) => void;
-      removeAllListeners: (channel: string) => void;
-      sendLog: (logEntry: any) => Promise<void>;
-      getLogLevel: () => Promise<number>;
-      setLogLevel: (level: number) => Promise<void>;
-      getLogDirectory: () => Promise<string>;
-      getLogFiles: () => Promise<string[]>;
-      clearLogs: () => Promise<void>;
-    };
-  }
-}
+// Window.electronAPI type is declared in src/declarations.d.ts (shared with renderer)

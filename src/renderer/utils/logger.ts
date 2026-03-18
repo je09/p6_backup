@@ -72,7 +72,7 @@ class RendererLogger {
   private async sendLog(logEntry: LogEntry): Promise<void> {
     try {
       if (window.electronAPI?.sendLog) {
-        await window.electronAPI.sendLog(logEntry);
+        await window.electronAPI.sendLog(logEntry as unknown as Record<string, unknown>);
       } else {
         // Fallback to console if IPC is not available
         console.log(

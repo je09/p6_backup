@@ -19,37 +19,49 @@ interface CombinedBackupOptionsProps {
   log: any;
 }
 
-interface OptionToggleProps {
+interface OptionSectionProps {
   checked: boolean;
-  onChange: (checked: boolean) => void;
+  onHeaderClick: () => void;
   disabled?: boolean;
   title: string;
+  warning?: string;
   children?: React.ReactNode;
-  warning?: React.ReactNode;
 }
 
-const OptionToggle: React.FC<OptionToggleProps> = ({
+const OptionSection: React.FC<OptionSectionProps> = ({
   checked,
-  onChange,
+  onHeaderClick,
   disabled,
   title,
-  children,
   warning,
+  children,
 }) => (
-  <label className="option-toggle">
-    <input
-      type="checkbox"
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      disabled={disabled}
-    />
-    <span className="toggle-slider"></span>
-    <div className="toggle-content">
-      <span className="toggle-title">{title}</span>
-      {warning}
+  <div className="option-section">
+    <div className={`option-header${disabled ? " option-disabled" : ""}`}>
+      <div className="field-row" style={{ margin: 0, gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onHeaderClick}
+          disabled={disabled}
+        />
+        <label
+          style={{ cursor: disabled ? "not-allowed" : "pointer" }}
+          onClick={disabled ? undefined : onHeaderClick}
+        >
+          {title}
+        </label>
+        {warning && (
+          <span style={{ fontSize: 11, color: "#666", fontStyle: "italic" }}>
+            — {warning}
+          </span>
+        )}
+      </div>
     </div>
-    {checked && children}
-  </label>
+    <div className="option-content">
+      {children}
+    </div>
+  </div>
 );
 
 export const CombinedBackupOptions: React.FC<CombinedBackupOptionsProps> = ({
@@ -68,82 +80,76 @@ export const CombinedBackupOptions: React.FC<CombinedBackupOptionsProps> = ({
   deviceStatus,
   log,
 }) => {
-  const handlePatternToggle = useCallback(
-    (checked: boolean) => {
-      log.debug("Pattern checkbox changed", { checked });
-      setIncludePatterns(checked);
-      if (checked && !includeSamples) setSelectedCombinedBanks([]);
-      if (checked && availablePatterns?.length > 0) {
-        setSelectedPatterns(availablePatterns.map((p) => p.id));
-        log.debug("Auto-selected all patterns when enabling patterns", {
-          count: availablePatterns.length,
-        });
-      } else if (!checked) {
-        setSelectedPatterns([]);
-      }
-    },
-    [
-      setIncludePatterns,
-      setSelectedCombinedBanks,
-      setSelectedPatterns,
-      includeSamples,
-      availablePatterns,
-      log,
-    ]
-  );
+  const handlePatternToggle = useCallback(() => {
+    const checked = !includePatterns;
+    log.debug("Pattern checkbox changed", { checked });
+    setIncludePatterns(checked);
+    if (checked && !includeSamples) setSelectedCombinedBanks([]);
+    if (!checked) setSelectedPatterns([]);
+  }, [
+    includePatterns,
+    setIncludePatterns,
+    setSelectedCombinedBanks,
+    setSelectedPatterns,
+    includeSamples,
+    log,
+  ]);
 
-  const handleSamplesToggle = useCallback(
-    (checked: boolean) => {
-      log.debug("Samples checkbox changed", { checked });
-      setIncludeSamples(checked);
-      if (!checked && includePatterns) setSelectedCombinedBanks([]);
-    },
-    [setIncludeSamples, setSelectedCombinedBanks, includePatterns, log]
-  );
+  const handleSamplesToggle = useCallback(() => {
+    const checked = !includeSamples;
+    log.debug("Samples checkbox changed", { checked });
+    setIncludeSamples(checked);
+    if (!checked && includePatterns) setSelectedCombinedBanks([]);
+  }, [includeSamples, setIncludeSamples, setSelectedCombinedBanks, includePatterns, log]);
+
+  const handlePatternSelectionChange = useCallback((patterns: string[]) => {
+    setSelectedPatterns(patterns);
+    if (patterns.length > 0 && !includePatterns) setIncludePatterns(true);
+  }, [setSelectedPatterns, includePatterns, setIncludePatterns]);
+
+  const handleBankSelectionChange = useCallback((banks: string[]) => {
+    setSelectedCombinedBanks(banks);
+    if (banks.length > 0 && !includeSamples) setIncludeSamples(true);
+  }, [setSelectedCombinedBanks, includeSamples, setIncludeSamples]);
 
   return (
-    <div className="combined-options">
-      <OptionToggle
+    <div>
+      <OptionSection
         checked={includePatterns}
-        onChange={handlePatternToggle}
+        onHeaderClick={handlePatternToggle}
         disabled={isBackupInProgress}
         title="Include Patterns"
         warning={
-          !canBackupPatterns && deviceStatus.connected ? (
-            <span className="toggle-warning">
-              Device must be in pattern mode
-            </span>
-          ) : null
+          !canBackupPatterns && deviceStatus.connected
+            ? "Device must be in pattern mode"
+            : undefined
         }
       >
-        <div className="pattern-selection">
-          <div className="selection-label">Patterns to backup:</div>
-          <PatternSelector
-            selectedPatterns={selectedPatterns}
-            onPatternSelectionChange={setSelectedPatterns}
-            disabled={!canBackupPatterns || isBackupInProgress}
-            availablePatterns={availablePatterns}
-          />
-        </div>
-      </OptionToggle>
-      <OptionToggle
+        <div style={{ marginBottom: 4 }}>Patterns to backup:</div>
+        <PatternSelector
+          selectedPatterns={selectedPatterns}
+          onPatternSelectionChange={handlePatternSelectionChange}
+          disabled={!canBackupPatterns || isBackupInProgress}
+          availablePatterns={availablePatterns}
+        />
+      </OptionSection>
+
+      <OptionSection
         checked={includeSamples}
-        onChange={handleSamplesToggle}
+        onHeaderClick={handleSamplesToggle}
         disabled={isBackupInProgress}
         title="Include Samples"
       >
-        <div className="sample-selection">
-          <div className="selection-label">
-            Sample Banks (leave empty for all banks):
-          </div>
-          <SampleBankSelector
-            selectedBanks={selectedCombinedBanks}
-            onBankSelectionChange={setSelectedCombinedBanks}
-            disabled={isBackupInProgress}
-            availableBanks={availableBanks}
-          />
+        <div style={{ marginBottom: 4 }}>
+          Sample Banks (leave empty for all):
         </div>
-      </OptionToggle>
+        <SampleBankSelector
+          selectedBanks={selectedCombinedBanks}
+          onBankSelectionChange={handleBankSelectionChange}
+          disabled={isBackupInProgress}
+          availableBanks={availableBanks}
+        />
+      </OptionSection>
     </div>
   );
 };

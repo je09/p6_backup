@@ -13,10 +13,10 @@ export interface SnackbarProps {
 }
 
 const ICONS: Record<string, string> = {
-  success: "✅",
-  error: "❌",
-  warning: "⚠️",
-  info: "ℹ️",
+  success: "✓",
+  error: "✕",
+  warning: "!",
+  info: "i",
 };
 
 export const Snackbar: React.FC<SnackbarProps> = ({
@@ -43,32 +43,35 @@ export const Snackbar: React.FC<SnackbarProps> = ({
 
   const handleClose = () => {
     setIsVisible(false);
-    setTimeout(onClose, 300); // Wait for exit animation
+    setTimeout(onClose, 300);
   };
 
   if (!visible && !isVisible) return null;
 
   return (
-    <div
-      className={`md-snackbar ${
-        isVisible ? "md-snackbar-visible" : "md-snackbar-hidden"
-      } md-snackbar-${type}`}
-    >
-      <div className="md-snackbar-content">
-        <span className="md-snackbar-icon">{ICONS[type] || ICONS.info}</span>
-        <span className="md-snackbar-message">{message}</span>
-        {action && (
-          <button className="md-snackbar-action" onClick={action.onClick}>
-            {action.label}
+    <div className={`mac-notification${isVisible ? "" : " hidden"}`}>
+      <div className="standard-dialog">
+        <div className="mac-notification-content">
+          <span
+            style={{
+              fontWeight: "bold",
+              minWidth: 16,
+              textAlign: "center",
+              flexShrink: 0,
+            }}
+          >
+            {ICONS[type]}
+          </span>
+          <span className="mac-notification-message">{message}</span>
+          {action && (
+            <button className="btn btn-default" onClick={action.onClick}>
+              {action.label}
+            </button>
+          )}
+          <button className="btn" onClick={handleClose} aria-label="Close">
+            Dismiss
           </button>
-        )}
-        <button
-          className="md-snackbar-close"
-          onClick={handleClose}
-          aria-label="Close"
-        >
-          ✕
-        </button>
+        </div>
       </div>
     </div>
   );

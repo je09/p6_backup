@@ -9,22 +9,20 @@ export const BackupProgressCard: React.FC<BackupProgressCardProps> = ({
   currentOperation,
   backupProgress,
 }) => (
-  <div className="backup-progress-card">
-    <div className="progress-content">
-      <div className="progress-text">
-        <div className="operation-name">{currentOperation}</div>
-        <div className="progress-percent">{backupProgress}%</div>
-      </div>
-      <div className="md-linear-progress">
-        <div
-          className="md-linear-progress-bar"
-          style={{ width: `${backupProgress}%` }}
-          aria-valuenow={backupProgress}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          role="progressbar"
-        />
-      </div>
+  <div className="section-block">
+    <div className="mac-progress-label">
+      <span><strong>Backup in Progress</strong> — {currentOperation}</span>
+      <span>{backupProgress}%</span>
+    </div>
+    <div className="mac-progress">
+      <div
+        className="mac-progress-fill"
+        style={{ width: `${backupProgress}%` }}
+        role="progressbar"
+        aria-valuenow={backupProgress}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      />
     </div>
   </div>
 );
