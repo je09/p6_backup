@@ -91,16 +91,12 @@ export const ERROR_MESSAGES = {
     "Failed to eject P6 device safely. You may manually disconnect the device.",
 
   // Backup validation
-  BACKUP_DEVICE_DISCONNECTED:
-    "Device must be connected to proceed with backup",
+  BACKUP_DEVICE_DISCONNECTED: "Device must be connected to proceed with backup",
   BACKUP_WRONG_BANK: (deviceBank: string, targetBank: string) =>
     `Device is currently set to bank ${deviceBank.toUpperCase()} but trying to backup bank ${targetBank.toUpperCase()}. Please switch to bank ${targetBank.toUpperCase()} on your device and try again.`,
-  BACKUP_BANK_NOT_AVAILABLE: (
-    targetBank: string,
-    availableBanks: string[]
-  ) =>
+  BACKUP_BANK_NOT_AVAILABLE: (targetBank: string, availableBanks: string[]) =>
     `Bank ${targetBank.toUpperCase()} is not available on the device. Available banks: ${availableBanks.join(
-      ", "
+      ", ",
     )}. Please check your device setup.`,
 
   // Parameter validation errors
@@ -236,7 +232,7 @@ export const INFO_MESSAGES = {
     description: string,
     backupPath: string,
     createdAt: Date,
-    lastUsed: Date | null
+    lastUsed: Date | null,
   ) =>
     `✅ Preset Information Verified\n\nName: ${name}\nType: ${type}\nDescription: ${
       description || "None"
@@ -303,7 +299,7 @@ export const LOG_MESSAGES = {
     `Bank ${bankId} samples format unexpected: ${keys.join(", ")}`,
   EXPECTED_SAMPLES_ARRAY: (bankId: string, keys: string[]) =>
     `Expected samples[${bankId}] to be an array, but it's not. Sample structure: ${keys.join(
-      ", "
+      ", ",
     )}`,
   GOT_ARRAY_NO_BANK_ID:
     "Got an array of samples but no bankId specified. Using 'unknown' as bank.",
@@ -380,9 +376,9 @@ export const UI_LABELS = {
 
   // Mode instructions
   MODE_INSTRUCTION_PATTERN:
-    "Switch your P6 to Pattern mode by pressing the PLAY button.",
+    "Hold [ø] while powering on for pattern backup. Hold [SAMPLING] while powering on for pattern restore.",
   MODE_INSTRUCTION_SAMPLE:
-    "Switch your P6 to Sample mode by pressing the SAMPLING button.",
+    "Hold bank buttons [A/E]–[D/H] while powering on for sample export. Hold [SAMPLING] while powering on for sample import.",
   MODE_INSTRUCTION_DEFAULT: (mode: string) => `Switch your P6 to ${mode} mode.`,
 
   // Mode labels
@@ -410,16 +406,18 @@ export const UI_LABELS = {
     const names: Record<string, string> = {
       pattern_export: "Pattern Backup",
       pattern_import: "Pattern Restore",
-      sample_export:  "Sample Backup",
-      sample_import:  "Sample Restore",
-      pattern:        "Pattern",
-      sample:         "Sample",
-      unknown:        "Unknown",
+      sample_export: "Sample Backup",
+      sample_import: "Sample Restore",
+      pattern: "Pattern",
+      sample: "Sample",
+      normal: "Normal",
+      unknown: "Unknown",
     };
     return `Connected \u2014 ${names[mode] ?? mode} Mode`;
   },
   BANK_INFO: (bank: string) => ` (Bank ${bank.toUpperCase()})`,
-  BANKS_INFO: (banks: string[]) => ` (Banks: ${banks.map(b => b.toUpperCase()).join(", ")})`,
+  BANKS_INFO: (banks: string[]) =>
+    ` (Banks: ${banks.map((b) => b.toUpperCase()).join(", ")})`,
   DEVICE_STATUS_TITLE: "Device Status",
 
   // Header navigation labels

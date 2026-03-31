@@ -8,7 +8,7 @@ export interface DeviceStatus {
     lastSync?: Date;
     error?: string;
     mode?: 'unknown' | 'backup' | 'restore' | 'sync' | 'pattern' | 'sample';
-    connectionType?: 'usb' | 'serial' | 'bluetooth';
+    connectionType?: 'usb';
     deviceId?: string;
     lastSeen?: Date | null;
 }

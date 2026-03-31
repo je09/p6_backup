@@ -1,5 +1,6 @@
 import React, { useMemo, useCallback } from "react";
-import { formatSize } from "../utils/formatters";
+
+import { SCALE_NAMES, PrmMetadata } from "../../shared/utils/prmParser";
 
 interface Pattern {
   id: string;
@@ -7,6 +8,7 @@ interface Pattern {
   bank: number;
   pattern: number;
   size: number;
+  metadata?: PrmMetadata;
 }
 
 interface PatternSelectorProps {
@@ -16,6 +18,15 @@ interface PatternSelectorProps {
   availablePatterns?: Pattern[];
 }
 
+function summarizeRange(
+  values: number[],
+  format: (v: number) => string
+): string {
+  if (values.length === 0) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return min === max ? format(min) : `${format(min)}–${format(max)}`;
+}
 
 export const PatternSelector: React.FC<PatternSelectorProps> = ({
   selectedPatterns,
@@ -31,6 +42,27 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
       return acc;
     }, {} as Record<string, Pattern[]>);
   }, [availablePatterns]);
+
+  const selectionSummary = useMemo(() => {
+    if (selectedPatterns.length === 0) return null;
+    const selected = availablePatterns.filter((p) =>
+      selectedPatterns.includes(p.id)
+    );
+    const withMeta = selected.filter((p) => p.metadata);
+    if (withMeta.length === 0) return null;
+
+    const tempos = withMeta.map((p) => p.metadata!.tempo);
+    const scales = withMeta.map((p) => p.metadata!.scale);
+    const lengths = withMeta.map((p) => p.metadata!.length);
+
+    return [
+      summarizeRange(tempos, (v) => `${v} BPM`),
+      summarizeRange(scales, (v) => SCALE_NAMES[v] ?? String(v)),
+      summarizeRange(lengths, (v) => `${v} steps`),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }, [selectedPatterns, availablePatterns]);
 
   const handleToggle = useCallback(
     (id: string) => {
@@ -87,6 +119,7 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
             <div className="pattern-grid">
               {patterns.map((p) => {
                 const selected = selectedPatterns.includes(p.id);
+                const meta = p.metadata;
                 return (
                   <div
                     key={p.id}
@@ -97,11 +130,13 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
                       <span className="pattern-chip-label">
                         P{p.pattern}
                       </span>
-                      <span className="pattern-chip-size">
-                        {formatSize(p.size)}
-                      </span>
                     </div>
                     <div className="pattern-chip-name">{p.name}</div>
+                    {meta && (
+                      <div className="pattern-chip-meta">
+                        {meta.tempo} BPM · {SCALE_NAMES[meta.scale] ?? meta.scale} · {meta.length} steps
+                      </div>
+                    )}
                     {selected && (
                       <span className="pattern-chip-checkmark">✓</span>
                     )}
@@ -115,6 +150,9 @@ export const PatternSelector: React.FC<PatternSelectorProps> = ({
       {selectedPatterns.length > 0 && (
         <div className="selection-info">
           {selectedPatterns.length} of {availablePatterns.length} selected
+          {selectionSummary && (
+            <span className="selection-meta"> · {selectionSummary}</span>
+          )}
         </div>
       )}
     </div>

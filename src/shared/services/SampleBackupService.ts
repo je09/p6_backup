@@ -23,7 +23,8 @@ export class SampleBackupService {
 
   async backupSamples(
     bankId?: string,
-    customName?: string
+    customName?: string,
+    padNumbers?: number[]
   ): Promise<BackupResult> {
     try {
       let deviceStatus = this.device.getStatus();
@@ -107,6 +108,12 @@ export class SampleBackupService {
 
       if (bankId) {
         samples = await this.readSamplesFromBank(bankId);
+        if (padNumbers && padNumbers.length > 0) {
+          samples.samples = samples.samples.filter((s) => {
+            const m = s.name.match(/^PAD_(\d+)\//i);
+            return m !== null && padNumbers.includes(parseInt(m[1], 10));
+          });
+        }
         itemCount = samples.samples.filter((s) => s.name.toUpperCase().endsWith(".WAV")).length;
       } else {
         samples = await this.readAllSamples();

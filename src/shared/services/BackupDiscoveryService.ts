@@ -1,5 +1,7 @@
+import * as fs from "fs/promises";
 import * as path from "path";
 import { BackupInfo } from "../types/index";
+import { parsePrmMetadata, PrmMetadata } from "../utils/prmParser";
 import { createComponentLogger } from "./Logger";
 import { FileSystemService } from "./FileSystemService";
 
@@ -58,15 +60,16 @@ export class BackupDiscoveryService {
 
       const rootPatternsData = await this.fs.readJsonFile(patternsFile, true);
       if (rootPatternsData && Array.isArray(rootPatternsData)) {
-        details.patterns = rootPatternsData.map(
-          (pattern: any, index: number) => ({
+        details.patterns = await Promise.all(
+          rootPatternsData.map(async (pattern: any, index: number) => ({
             id: pattern.id || `pattern-${index}`,
             name: pattern.name || `Pattern ${pattern.bank}-${pattern.pattern}`,
             bank: pattern.bank || Math.floor(index / 16) + 1,
             pattern: pattern.pattern || (index % 16) + 1,
             size: pattern.size || 0,
             selected: false,
-          })
+            metadata: pattern.metadata ?? await this.parsePrmFile(pattern.path),
+          }))
         );
         details.totalPatternSize = details.patterns.reduce(
           (sum: number, p: any) => sum + p.size,
@@ -80,16 +83,16 @@ export class BackupDiscoveryService {
           true
         );
         if (nestedPatternsData && Array.isArray(nestedPatternsData)) {
-          details.patterns = nestedPatternsData.map(
-            (pattern: any, index: number) => ({
+          details.patterns = await Promise.all(
+            nestedPatternsData.map(async (pattern: any, index: number) => ({
               id: pattern.id || `pattern-${index}`,
-              name:
-                pattern.name || `Pattern ${pattern.bank}-${pattern.pattern}`,
+              name: pattern.name || `Pattern ${pattern.bank}-${pattern.pattern}`,
               bank: pattern.bank || Math.floor(index / 16) + 1,
               pattern: pattern.pattern || (index % 16) + 1,
               size: pattern.size || 0,
               selected: false,
-            })
+              metadata: pattern.metadata ?? await this.parsePrmFile(pattern.path),
+            }))
           );
           details.totalPatternSize = details.patterns.reduce(
             (sum: number, p: any) => sum + p.size,
@@ -109,14 +112,18 @@ export class BackupDiscoveryService {
         for (const [bankId, bankSamples] of Object.entries(samplesData)) {
           if (Array.isArray(bankSamples)) {
             details.samples[bankId.toUpperCase()] = bankSamples.map(
-              (sample: any, index: number) => ({
-                id: sample.id || `${bankId}-${sample.pad || index}`,
-                name: sample.name || `Pad ${sample.pad || index + 1}`,
-                bank: bankId.toUpperCase(),
-                pad: sample.pad || index + 1,
-                size: sample.size || 0,
-                selected: false,
-              })
+              (sample: any, index: number) => {
+                const padMatch = (sample.name || '').match(/^PAD_(\d+)\//i);
+                const pad = padMatch ? parseInt(padMatch[1], 10) : (sample.pad ?? (index + 1));
+                return {
+                  id: sample.id || `${bankId}-${pad}`,
+                  name: sample.name || `Pad ${pad}`,
+                  bank: bankId.toUpperCase(),
+                  pad,
+                  size: sample.size || 0,
+                  selected: false,
+                };
+              }
             );
             details.totalSampleSize += bankSamples.reduce(
               (sum: number, s: any) => sum + (s.size || 0),
@@ -215,6 +222,16 @@ export class BackupDiscoveryService {
     // Custom name: everything before the first timestamp segment
     const parts = dirName.split("-");
     return parts[0] || dirName;
+  }
+
+  /** Read a PRM file and parse its metadata. Returns undefined on any error. */
+  private async parsePrmFile(filePath: string): Promise<PrmMetadata | undefined> {
+    try {
+      const content = await fs.readFile(filePath, "ascii");
+      return parsePrmMetadata(content);
+    } catch {
+      return undefined;
+    }
   }
 
   private async hasPatterns(dirPath: string): Promise<boolean> {

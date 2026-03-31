@@ -4,6 +4,7 @@
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RestoreSection } from "../../../renderer/components/RestoreSection";
+import { SnackbarProvider } from "../../../renderer/context/SnackbarContext";
 import { DeviceStatus } from "../../../shared/types/index";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ jest.mock("../../../renderer/components/RestoreSelectionModal", () => ({
               selectedPatterns: [],
               selectedSampleBanks: ["A"],
               selectedSamples: {},
+              bankSizes: { A: 0 },
             })
           }
         >
@@ -97,25 +99,52 @@ function setupElectronAPI(overrides: Partial<Record<string, jest.Mock>> = {}) {
   };
 }
 
-// Helper: render, wait for backup list, click backup item, confirm the modal
-async function openAndConfirmRestore(mode: string, apiOverrides: Partial<Record<string, jest.Mock>> = {}) {
+/**
+ * Render RestoreSection, confirm the mock selection modal, and return `rerender`
+ * so individual tests can simulate device disconnect/reconnect.
+ *
+ * After confirming, the component enters a pending state gated by
+ * `requiresDeviceDisconnect`. Tests must call `simulateDeviceCycle` to clear
+ * that gate before the "Continue" buttons become clickable.
+ */
+async function openAndConfirmRestore(
+  mode: string,
+  apiOverrides: Partial<Record<string, jest.Mock>> = {}
+) {
   setupElectronAPI(apiOverrides);
-  render(
-    <RestoreSection
-      deviceStatus={makeStatus(mode)}
-      onRestoreComplete={jest.fn()}
-    />
+  const { rerender } = render(
+    <SnackbarProvider>
+      <RestoreSection deviceStatus={makeStatus(mode)} onRestoreComplete={jest.fn()} />
+    </SnackbarProvider>
   );
 
-  // Wait for backup list to populate
   await waitFor(() => expect(screen.getByText("backup-2024-01")).not.toBeNull());
-
-  // Click the backup item
-  fireEvent.click(screen.getByText("backup-2024-01"));
-
-  // Wait for the selection modal, then confirm
+  fireEvent.dblClick(screen.getByText("backup-2024-01"));
   await waitFor(() => expect(screen.queryByTestId("confirm-patterns-and-samples")).not.toBeNull());
   fireEvent.click(screen.getByTestId("confirm-patterns-and-samples"));
+
+  return { rerender };
+}
+
+/** Simulate device power-off → power-on in a new mode to clear requiresDeviceDisconnect. */
+async function simulateDeviceCycle(
+  rerender: ReturnType<typeof render>["rerender"],
+  reconnectMode: string
+) {
+  rerender(
+    <SnackbarProvider>
+      <RestoreSection deviceStatus={makeStatus("unknown", false)} onRestoreComplete={jest.fn()} />
+    </SnackbarProvider>
+  );
+  // Allow effects to run (requiresDeviceDisconnect → false)
+  await waitFor(() =>
+    expect(screen.queryByText("Waiting for device to power off…")).toBeNull()
+  );
+  rerender(
+    <SnackbarProvider>
+      <RestoreSection deviceStatus={makeStatus(reconnectMode)} onRestoreComplete={jest.fn()} />
+    </SnackbarProvider>
+  );
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -124,14 +153,11 @@ describe("RestoreSection — mode check before next batch sample restore", () =>
   it("shows mode switch modal instead of calling restoreSamples when device is in wrong mode", async () => {
     const restoreSamples = jest.fn();
 
-    // Start in pattern_import: pattern restore happens first, sample restore queued
-    // Then when "Continue" is clicked, device is still in wrong mode
-    await openAndConfirmRestore("pattern_import", {
+    const { rerender } = await openAndConfirmRestore("pattern_import", {
       restorePatterns: jest.fn().mockResolvedValue({
         success: true, message: "patterns ok", itemCount: 3, type: "backup", timestamp: new Date(),
       }),
       restoreSamples,
-      // When "Continue Restore (Next Batch)" is clicked, device is in wrong mode
       checkModeRequirement: jest.fn().mockImplementation(async (op: string) => {
         if (op === "sample restore") {
           return { currentMode: "pattern_import", requiredMode: "sample_import" };
@@ -140,14 +166,20 @@ describe("RestoreSection — mode check before next batch sample restore", () =>
       }),
     });
 
-    // Pattern restore completes → "Continue Restore (Next Batch)" button appears
+    // Pattern restore completes → pending overlay appears with disconnect gate
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for device to power off…")).not.toBeNull()
+    );
+
+    // Simulate device power-off → reconnect in sample_import mode
+    await simulateDeviceCycle(rerender, "sample_import");
+
     await waitFor(() =>
       expect(screen.queryByText("Continue Restore (Next Batch)")).not.toBeNull()
     );
-
     fireEvent.click(screen.getByText("Continue Restore (Next Batch)"));
 
-    // Mode switch modal should appear, restoreSamples should NOT have been called
+    // Device is in wrong mode → mode switch modal should appear
     await waitFor(() =>
       expect(screen.queryByTestId("mode-switch-modal")).not.toBeNull()
     );
@@ -159,18 +191,22 @@ describe("RestoreSection — mode check before next batch sample restore", () =>
       success: true, message: "samples ok", itemCount: 2, type: "backup", timestamp: new Date(),
     });
 
-    await openAndConfirmRestore("pattern_import", {
+    const { rerender } = await openAndConfirmRestore("pattern_import", {
       restorePatterns: jest.fn().mockResolvedValue({
         success: true, message: "patterns ok", itemCount: 3, type: "backup", timestamp: new Date(),
       }),
       restoreSamples,
-      checkModeRequirement: jest.fn().mockResolvedValue(null), // correct mode
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
     });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for device to power off…")).not.toBeNull()
+    );
+    await simulateDeviceCycle(rerender, "sample_import");
 
     await waitFor(() =>
       expect(screen.queryByText("Continue Restore (Next Batch)")).not.toBeNull()
     );
-
     fireEvent.click(screen.getByText("Continue Restore (Next Batch)"));
 
     await waitFor(() => expect(restoreSamples).toHaveBeenCalled());
@@ -182,13 +218,11 @@ describe("RestoreSection — mode check before pending pattern restore", () => {
   it("shows mode switch modal instead of calling restorePatterns when device is in wrong mode", async () => {
     const restorePatterns = jest.fn();
 
-    // Start in sample_import: sample restore happens first, pattern restore queued
-    await openAndConfirmRestore("sample_import", {
+    const { rerender } = await openAndConfirmRestore("sample_import", {
       restoreSamples: jest.fn().mockResolvedValue({
         success: true, message: "samples ok", itemCount: 2, type: "backup", timestamp: new Date(),
       }),
       restorePatterns,
-      // When "Continue — Restore Patterns" is clicked, device is in wrong mode
       checkModeRequirement: jest.fn().mockImplementation(async (op: string) => {
         if (op === "pattern restore") {
           return { currentMode: "sample_import", requiredMode: "pattern_import" };
@@ -197,11 +231,15 @@ describe("RestoreSection — mode check before pending pattern restore", () => {
       }),
     });
 
-    // Sample restore completes → "Continue — Restore Patterns" button appears
+    // Sample restore completes → pending pattern restore queued, disconnect gate active
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for device to power off…")).not.toBeNull()
+    );
+    await simulateDeviceCycle(rerender, "pattern_import");
+
     await waitFor(() =>
       expect(screen.queryByText("Continue — Restore Patterns")).not.toBeNull()
     );
-
     fireEvent.click(screen.getByText("Continue — Restore Patterns"));
 
     await waitFor(() =>
@@ -215,18 +253,22 @@ describe("RestoreSection — mode check before pending pattern restore", () => {
       success: true, message: "patterns ok", itemCount: 3, type: "backup", timestamp: new Date(),
     });
 
-    await openAndConfirmRestore("sample_import", {
+    const { rerender } = await openAndConfirmRestore("sample_import", {
       restoreSamples: jest.fn().mockResolvedValue({
         success: true, message: "samples ok", itemCount: 2, type: "backup", timestamp: new Date(),
       }),
       restorePatterns,
-      checkModeRequirement: jest.fn().mockResolvedValue(null), // correct mode
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
     });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Waiting for device to power off…")).not.toBeNull()
+    );
+    await simulateDeviceCycle(rerender, "pattern_import");
 
     await waitFor(() =>
       expect(screen.queryByText("Continue — Restore Patterns")).not.toBeNull()
     );
-
     fireEvent.click(screen.getByText("Continue — Restore Patterns"));
 
     await waitFor(() => expect(restorePatterns).toHaveBeenCalled());

@@ -1,6 +1,7 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { BackupResult, RestoreResult, BackupType, PatternInfo } from "../types/index";
+import { parsePrmMetadata } from "../utils/prmParser";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
 import { IDeviceConnection } from "./interfaces";
@@ -159,7 +160,8 @@ export class PatternBackupService {
         const destPath = path.join(patternsDir, fileName);
         try {
           await this.fileSystemService.copyFile(pattern.path, destPath);
-          updated.push({ ...pattern, path: destPath });
+          const metadata = await this.readPrmMetadata(destPath);
+          updated.push({ ...pattern, path: destPath, metadata });
         } catch (error) {
           this.logger.warn(`Failed to copy pattern file ${pattern.name}`, { error });
           updated.push(pattern);
@@ -169,6 +171,15 @@ export class PatternBackupService {
       }
     }
     return updated;
+  }
+
+  private async readPrmMetadata(filePath: string) {
+    try {
+      const content = await fs.readFile(filePath, "ascii");
+      return parsePrmMetadata(content);
+    } catch {
+      return undefined;
+    }
   }
 
   private async writePatternsToDevice(patterns: PatternInfo[]): Promise<void> {

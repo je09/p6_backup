@@ -21,10 +21,10 @@ const MODE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const MODE_INSTRUCTIONS: Record<string, string> = {
-  pattern_export: "Hold PLAY while powering on the device.",
-  pattern_import: "Hold REC while powering on the device.",
-  sample_export:  "Hold BANK + SAMPLING while powering on the device.",
-  sample_import:  "Hold SAMPLING while powering on the device.",
+  pattern_export: "Hold [ø] while powering on the device.",
+  pattern_import: "Hold [SAMPLING] while powering on the device.",
+  sample_export:  "Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H).",
+  sample_import:  "Hold [SAMPLING] while powering on the device.",
   pattern:        UI_LABELS.MODE_INSTRUCTION_PATTERN,
   sample:         UI_LABELS.MODE_INSTRUCTION_SAMPLE,
 };

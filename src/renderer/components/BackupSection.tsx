@@ -9,6 +9,7 @@ import { useBackupOrchestration } from "../hooks/useBackupOrchestration";
 import { useBackupState } from "../hooks/useBackupState";
 import { BackupProgressCard } from "./BackupProgressCard";
 import { BackupOptions } from "./BackupOptions";
+import { groupDependenciesByBank } from "../../shared/utils/prmParser";
 
 interface BackupSectionProps {
   deviceStatus: DeviceStatus;
@@ -25,28 +26,21 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
 
   const { showSnackbar } = useSnackbar();
 
-  const [showCompleteDialog, setShowCompleteDialog] = useState(false);
-  const [completeBackupName, setCompleteBackupName] = useState("");
-
-  const [showErrorDialog, setShowErrorDialog] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [resultDialog, setResultDialog] = useState<{
+    type: "success" | "error";
+    title: string;
+    message: string;
+  } | null>(null);
 
   const showBackupError = useCallback((msg: string) => {
-    setErrorMessage(msg);
-    setShowErrorDialog(true);
+    setResultDialog({ type: "error", title: "Backup Failed", message: msg });
   }, []);
 
   const {
-    availableBanks,
     availablePatterns,
     selectedPatterns,
     setSelectedPatterns,
-    includePatterns,
-    setIncludePatterns,
-    includeSamples,
-    setIncludeSamples,
-    selectedCombinedBanks,
-    setSelectedCombinedBanks,
+    detectedDependencies,
   } = useBackupState(deviceStatus);
 
   const canBackupPatterns = ["pattern", "pattern_export", "pattern_import"].includes(
@@ -74,11 +68,10 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
   const handleBackupCompleteWrapped = useCallback((result: BackupResult) => {
     if (result.success) {
       const name = result.backupPath ? result.backupPath.split(/[\\/]/).pop() ?? "" : "";
-      setCompleteBackupName(name);
-      setShowCompleteDialog(true);
+      setResultDialog({ type: "success", title: "Backup Complete", message: name ? `Saved as: ${name}` : "Your backup has been saved successfully." });
     }
     onBackupComplete(result);
-  }, [onBackupComplete]);
+  }, [onBackupComplete, setResultDialog]);
 
   const {
     isBackingUp,
@@ -197,26 +190,25 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
 
   // Snapshot state at click time to avoid stale closure issues
   const handleCreateBackup = () => {
-    const snapPatterns = includePatterns;
-    const snapSamples = includeSamples;
-    const snapBanks = selectedCombinedBanks.slice();
     const snapPatternIds = selectedPatterns.slice();
-    const allBanks = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    // Unique bank letters derived from pattern metadata dependencies (lower-cased)
+    const depBanks = [...new Set(detectedDependencies.map((d) => d.bankLetter.toLowerCase()))].sort();
+    // Samples are included whenever dependencies are detected from selected patterns
+    const snapSamples = depBanks.length > 0;
+    // Per-bank pad lists (uppercase keys, e.g. { "A": [1, 3] })
+    const snapBankPads = groupDependenciesByBank(detectedDependencies);
 
     const doStart = async (customName?: string) => {
-      const resolvedBanks = snapSamples
-        ? snapBanks.length > 0 ? snapBanks : allBanks
-        : [];
+      const resolvedBanks = snapSamples ? depBanks : [];
 
       // Patterns-only: use direct backup API — no need for multi-step orchestration
-      if (snapPatterns && !snapSamples) {
+      if (!snapSamples) {
         try {
           const patternIds = snapPatternIds.length > 0 ? snapPatternIds : undefined;
           const result = await window.electronAPI.backupPatterns(customName, patternIds);
           onBackupComplete(result);
           if (result.success) {
-            setCompleteBackupName(customName ?? "Backup");
-            setShowCompleteDialog(true);
+            setResultDialog({ type: "success", title: "Backup Complete", message: customName ? `Saved as: ${customName}` : "Your backup has been saved successfully." });
           } else {
             showBackupError(result.message || "Backup failed");
           }
@@ -237,41 +229,9 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
         return;
       }
 
-      // Samples-only with a single bank: use direct API — device is already in sample mode for that bank
-      if (!snapPatterns && snapSamples && resolvedBanks.length === 1) {
-        try {
-          const result = await window.electronAPI.backupSamples(resolvedBanks[0], customName);
-          onBackupComplete(result);
-          if (result.success) {
-            setCompleteBackupName(customName ?? "Backup");
-            setShowCompleteDialog(true);
-          } else {
-            showBackupError(result.message || "Backup failed");
-          }
-        } catch (error: any) {
-          const modeInfo = ModeError.fromError(error);
-          if (modeInfo) {
-            setModeSwitchDetails({
-              currentMode: modeInfo.currentMode,
-              requiredMode: modeInfo.requiredMode,
-              operation: "Sample Backup",
-              onContinue: () => doStart(customName),
-            });
-            setShowModeSwitchModal(true);
-            return;
-          }
-          showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
-        }
-        return;
-      }
-
-      // Combined or multi-bank samples: use multi-step orchestration
+      // Patterns + samples: use multi-step orchestration
       try {
-        if (snapPatterns) {
-          startBackup(resolvedBanks, "patterns", customName, snapPatternIds);
-        } else {
-          startBackup(resolvedBanks, "samples", customName);
-        }
+        startBackup(resolvedBanks, "patterns", customName, snapPatternIds, snapBankPads);
       } catch (error: any) {
         const modeInfo = ModeError.fromError(error);
         if (modeInfo) {
@@ -300,13 +260,12 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
           return;
         }
         try {
-          const modeToCheck = snapPatterns ? "pattern backup" : "sample backup";
-          const req = await window.electronAPI.checkModeRequirement(modeToCheck);
+          const req = await window.electronAPI.checkModeRequirement("pattern backup");
           if (req) {
             setModeSwitchDetails({
               currentMode: req.currentMode,
               requiredMode: req.requiredMode,
-              operation: snapPatterns ? "Pattern Backup" : "Sample Backup",
+              operation: "Pattern Backup",
               onContinue: () => doStart(customName),
             });
             setShowModeSwitchModal(true);
@@ -321,16 +280,17 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     setShowBackupNameModal(true);
   };
 
-  const getButtonText = () => {
-    if (isBackingUp) return "Backing up…";
-    if (!deviceStatus.connected) return "Device Not Connected";
+  const getDeviceStatusHint = () => {
+    if (isBackingUp) return null;
+    if (!deviceStatus.connected) return "Device not connected.";
     if (!isDeviceReadyForContinue) {
-      if (backupMode === "patterns") return "Switch to Pattern Mode";
+      if (backupMode === "patterns")
+        return "Switch device to Pattern Mode (hold PLAY while powering on).";
       if (backupMode === "samples")
-        return `Select Bank ${bankQueue[currentBankIndex]?.toUpperCase()}`;
-      return "Device Not Ready";
+        return `Select Bank ${bankQueue[currentBankIndex]?.toUpperCase()} on the device.`;
+      return "Device not ready.";
     }
-    return "Continue";
+    return null;
   };
 
   const getButtonDisabledReason = () => {
@@ -348,102 +308,81 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {showBackupGuide && (
-        <div className="section-block">
-          <div className="section-heading">Backup</div>
-          <p className="guide-instruction">{currentOperation}</p>
-          {isBackingUp && (
-            <BackupProgressCard
-              currentOperation={currentOperation}
-              backupProgress={backupProgress}
-            />
-          )}
-          <section className="field-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
-            <button
-              className="btn btn-default"
-              onClick={handleCancel}
-              disabled={isBackingUp}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleContinue}
-              disabled={!isDeviceReadyForContinue || isBackingUp}
-              title={!isDeviceReadyForContinue ? getButtonDisabledReason() : ""}
-            >
-              {getButtonText()}
-            </button>
-          </section>
-        </div>
-      )}
-      {!showBackupGuide && (
-        <div className="section-block">
-          <div className="section-heading">Backup</div>
+      <div className="section-block">
+        <div className="section-heading">Backup</div>
+        {showBackupGuide && (
+          <>
+            <p className="guide-instruction">{currentOperation}</p>
+            {isBackingUp && (
+              <BackupProgressCard
+                currentOperation={currentOperation}
+                backupProgress={backupProgress}
+              />
+            )}
+            {getDeviceStatusHint() && (
+              <p className="guide-instruction" style={{ fontStyle: "italic" }}>
+                {getDeviceStatusHint()}
+              </p>
+            )}
+            <section className="field-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 10 }}>
+              <button
+                className="btn btn-default"
+                onClick={handleCancel}
+                disabled={isBackingUp}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleContinue}
+                disabled={!isDeviceReadyForContinue || isBackingUp}
+                title={!isDeviceReadyForContinue ? getButtonDisabledReason() : ""}
+              >
+                {isBackingUp ? "Backing up…" : "Continue"}
+              </button>
+            </section>
+            <hr className="create-backup-divider" />
+          </>
+        )}
+        {!showBackupGuide && (
           <BackupOptions
-            includePatterns={includePatterns}
-            setIncludePatterns={setIncludePatterns}
-            includeSamples={includeSamples}
-            setIncludeSamples={setIncludeSamples}
             availablePatterns={availablePatterns}
             selectedPatterns={selectedPatterns}
             setSelectedPatterns={setSelectedPatterns}
             canBackupPatterns={canBackupPatterns}
             isBackupInProgress={isBackingUp}
-            availableBanks={availableBanks}
-            selectedCombinedBanks={selectedCombinedBanks}
-            setSelectedCombinedBanks={setSelectedCombinedBanks}
+            detectedDependencies={detectedDependencies}
             deviceStatus={deviceStatus}
-            log={log}
           />
+        )}
+        {!showBackupGuide && (
           <div className="create-backup-footer">
             <hr className="create-backup-divider" />
             <button
               className="btn btn-default create-backup-btn"
               onClick={handleCreateBackup}
-              disabled={isBackingUp || !deviceStatus.connected || (!includePatterns && !includeSamples)}
+              disabled={isBackingUp || !deviceStatus.connected || selectedPatterns.length === 0}
+              title={selectedPatterns.length === 0 ? "Select at least one pattern to back up" : undefined}
             >
               Create Backup
             </button>
           </div>
-        </div>
-      )}
-      {showCompleteDialog && (
+        )}
+      </div>
+      {resultDialog && (
         <div className="mac-overlay">
           <div className="modal-dialog outer-border" style={{ width: "26rem", maxWidth: "90vw" }}>
             <div className="inner-border">
               <div className="modal-contents">
-                <h1 className="modal-text">Backup Complete</h1>
-                <p>Your backup has been saved successfully.</p>
-                {completeBackupName && (
-                  <p style={{ fontSize: 12, color: "#555" }}>
-                    Saved as: <strong>{completeBackupName}</strong>
-                  </p>
-                )}
+                <h1 className="modal-text">{resultDialog.title}</h1>
+                <p style={{ marginBottom: 10 }}>{resultDialog.message}</p>
                 <section className="field-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
                   <button
                     className="btn btn-default"
-                    onClick={() => setShowCompleteDialog(false)}
-                  >
-                    OK
-                  </button>
-                </section>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      {showErrorDialog && (
-        <div className="mac-overlay">
-          <div className="modal-dialog outer-border" style={{ width: "26rem", maxWidth: "90vw" }}>
-            <div className="inner-border">
-              <div className="modal-contents">
-                <h1 className="modal-text">Backup Failed</h1>
-                <p style={{ marginBottom: 10 }}>{errorMessage}</p>
-                <section className="field-row" style={{ justifyContent: "flex-end", marginTop: 12 }}>
-                  <button
-                    className="btn btn-default"
-                    onClick={() => { setShowErrorDialog(false); handleCancel(); }}
+                    onClick={() => {
+                      if (resultDialog.type === "error") handleCancel();
+                      setResultDialog(null);
+                    }}
                   >
                     OK
                   </button>

@@ -36,6 +36,7 @@ export function useBackupOrchestration({
   const queueRef = useRef<string[]>([]);
   const modeRef = useRef<"patterns" | "samples" | null>(null);
   const selectedPatternIdsRef = useRef<string[]>([]);
+  const bankPadsRef = useRef<Record<string, number[]>>({});
 
   const resetProgress = useCallback(() => {
     setIsBackupInProgress(false);
@@ -48,12 +49,14 @@ export function useBackupOrchestration({
       banks: string[],
       initialMode: "patterns" | "samples",
       customName?: string,
-      selectedPatternIds?: string[]
+      selectedPatternIds?: string[],
+      bankPads?: Record<string, number[]>
     ) => {
       customNameRef.current = customName;
       queueRef.current = banks;
       modeRef.current = initialMode;
       selectedPatternIdsRef.current = selectedPatternIds ?? [];
+      bankPadsRef.current = bankPads ?? {};
 
       setBankQueue(banks);
       setCurrentBankIndex(0);
@@ -246,9 +249,11 @@ export function useBackupOrchestration({
         }
 
         setCurrentOperation(`Backing up bank ${currentBank.toUpperCase()}...`);
+        const padNumbers = bankPadsRef.current[currentBank.toUpperCase()];
         const result = await window.electronAPI.backupSamples(
           currentBank,
-          undefined
+          undefined,
+          padNumbers
         );
         if (!result.success) {
           throw new Error(

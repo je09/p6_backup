@@ -2,7 +2,12 @@ import { DeviceMode } from '../types/index';
 
 export const DEVICE_MODES = {
     PATTERN: 'pattern' as DeviceMode,
+    PATTERN_EXPORT: 'pattern_export' as DeviceMode,
+    PATTERN_IMPORT: 'pattern_import' as DeviceMode,
     SAMPLE: 'sample' as DeviceMode,
+    SAMPLE_EXPORT: 'sample_export' as DeviceMode,
+    SAMPLE_IMPORT: 'sample_import' as DeviceMode,
+    NORMAL: 'normal' as DeviceMode,
     UNKNOWN: 'unknown' as DeviceMode,
 } as const;
 
@@ -64,6 +69,7 @@ export const MASS_STORAGE_MODE_MAP: Record<string, DeviceMode> = {
     'sample_import': 'sample_import',
     'pattern_export': 'pattern_export',
     'pattern_import': 'pattern_import',
+    'normal': 'normal' as DeviceMode,
     'unknown': DEVICE_MODES.UNKNOWN,
 };
 

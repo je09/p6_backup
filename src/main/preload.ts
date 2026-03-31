@@ -6,8 +6,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Backup Operations (staging steps used by orchestration)
   backupPatterns: (customName?: string, patternIds?: string[]) =>
     ipcRenderer.invoke("backup:patterns", customName, patternIds),
-  backupSamples: (bankId?: string, customName?: string) =>
-    ipcRenderer.invoke("backup:samples", bankId, customName),
+  backupSamples: (bankId?: string, customName?: string, padNumbers?: number[]) =>
+    ipcRenderer.invoke("backup:samples", bankId, customName, padNumbers),
   backup: (options: {
     includePatterns?: boolean;
     includeSamples?: boolean;

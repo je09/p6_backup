@@ -1,26 +1,32 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { BackupInfo } from "../../shared/types/index";
+import { PrmMetadata, SampleDependency, SCALE_NAMES } from "../../shared/utils/prmParser";
 import { formatSize } from "../utils/formatters";
 
+const MAX_SESSION_BYTES = 10 * 1024 * 1024;
+
+interface PatternItem {
+  id: string;
+  name: string;
+  bank: number;
+  pattern: number;
+  size: number;
+  selected: boolean;
+  metadata?: PrmMetadata;
+}
+
+interface SampleItem {
+  id: string;
+  name: string;
+  bank: string;
+  pad: number;
+  size: number;
+  selected: boolean;
+}
+
 interface BackupContentDetails {
-  patterns?: {
-    id: string;
-    name: string;
-    bank: number;
-    pattern: number;
-    size: number;
-    selected: boolean;
-  }[];
-  samples?: {
-    [bankId: string]: {
-      id: string;
-      name: string;
-      bank: string;
-      pad: number;
-      size: number;
-      selected: boolean;
-    }[];
-  };
+  patterns?: PatternItem[];
+  samples?: { [bankId: string]: SampleItem[] };
   totalPatternSize: number;
   totalSampleSize: number;
   selectedPatternSize: number;
@@ -36,10 +42,18 @@ interface RestoreSelectionModalProps {
     selectedPatterns: string[];
     selectedSampleBanks: string[];
     selectedSamples: { [bankId: string]: string[] };
+    /** Total selected bytes per bank — used for size-based session batching. */
+    bankSizes: Record<string, number>;
   }) => void;
   onCancel: () => void;
 }
 
+function summarizeRange(values: number[], format: (v: number) => string): string {
+  if (values.length === 0) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return min === max ? format(min) : `${format(min)}–${format(max)}`;
+}
 
 export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
   isOpen,
@@ -49,9 +63,12 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
 }) => {
   const [backupDetails, setBackupDetails] = useState<BackupContentDetails | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [includePatterns, setIncludePatterns] = useState(false);
   const [includeSamples, setIncludeSamples] = useState(false);
-  const SIZE_THRESHOLD = 10 * 1024 * 1024;
+  const [skipSamples, setSkipSamples] = useState(false);
+  /** Set of "BANK-pad" keys excluded by the user in the required-samples panel. */
+  const [excludedPads, setExcludedPads] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (isOpen && backup) {
@@ -61,10 +78,13 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
 
   const loadBackupDetails = async () => {
     setIsLoading(true);
+    setLoadError(null);
+    setExcludedPads(new Set());
+    setSkipSamples(false);
     try {
       const details = await window.electronAPI.getBackupDetails(backup.path);
       const processedDetails: BackupContentDetails = {
-        patterns: details.patterns?.map((p: any) => ({ ...p, selected: true })),
+        patterns: details.patterns?.map((p: any) => ({ ...p, selected: false })),
         samples: {},
         totalPatternSize: 0,
         totalSampleSize: 0,
@@ -82,7 +102,7 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
         processedDetails.totalPatternSize = processedDetails.patterns.reduce(
           (sum, p) => sum + p.size, 0
         );
-        processedDetails.selectedPatternSize = processedDetails.totalPatternSize;
+        processedDetails.selectedPatternSize = 0;
       }
       if (processedDetails.samples) {
         Object.values(processedDetails.samples).forEach((bank) => {
@@ -94,12 +114,15 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
       setBackupDetails(processedDetails);
       setIncludePatterns(!!processedDetails.patterns?.length);
       setIncludeSamples(!!Object.keys(processedDetails.samples || {}).length);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load backup details:", error);
+      setLoadError(error?.message || String(error));
     } finally {
       setIsLoading(false);
     }
   };
+
+  // ── Pattern selection ──────────────────────────────────────────────────────
 
   const selectAllPatterns = useCallback(() =>
     setBackupDetails((prev) =>
@@ -118,6 +141,21 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
         selectedPatternSize: 0,
       }
     ), []);
+
+  const togglePattern = useCallback((patternId: string) => {
+    setBackupDetails((prev) => {
+      if (!prev?.patterns) return prev;
+      const patterns = prev.patterns.map((p) =>
+        p.id === patternId ? { ...p, selected: !p.selected } : p
+      );
+      return {
+        ...prev, patterns,
+        selectedPatternSize: patterns.filter((p) => p.selected).reduce((s, p) => s + p.size, 0),
+      };
+    });
+  }, []);
+
+  // ── Legacy bank-level sample selection (used when no metadata) ─────────────
 
   const selectAllSamples = useCallback(() =>
     setBackupDetails((prev) =>
@@ -145,19 +183,6 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
       }
     ), []);
 
-  const togglePattern = useCallback((patternId: string) => {
-    setBackupDetails((prev) => {
-      if (!prev?.patterns) return prev;
-      const patterns = prev.patterns.map((p) =>
-        p.id === patternId ? { ...p, selected: !p.selected } : p
-      );
-      return {
-        ...prev, patterns,
-        selectedPatternSize: patterns.filter((p) => p.selected).reduce((s, p) => s + p.size, 0),
-      };
-    });
-  }, []);
-
   const toggleBank = useCallback((bankId: string) => {
     setBackupDetails((prev) => {
       if (!prev?.samples?.[bankId]) return prev;
@@ -171,16 +196,149 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
     });
   }, []);
 
+  // ── Derived: required samples from selected pattern metadata ───────────────
+
+  const selectedPatternItems = useMemo(
+    () => backupDetails?.patterns?.filter((p) => p.selected) ?? [],
+    [backupDetails]
+  );
+
+  const patternsHaveMetadata = useMemo(
+    () => selectedPatternItems.some((p) => p.metadata),
+    [selectedPatternItems]
+  );
+
+  /** Deduplicated list of pad dependencies from all selected patterns with metadata. */
+  const requiredDeps = useMemo((): SampleDependency[] => {
+    if (!patternsHaveMetadata) return [];
+    const seen = new Set<string>();
+    const deps: SampleDependency[] = [];
+    for (const p of selectedPatternItems) {
+      for (const dep of p.metadata?.dependencies ?? []) {
+        const key = `${dep.bankLetter}-${dep.padNumber}`;
+        if (!seen.has(key)) { seen.add(key); deps.push(dep); }
+      }
+    }
+    return deps.sort(
+      (a, b) => a.bankLetter.localeCompare(b.bankLetter) || a.padNumber - b.padNumber
+    );
+  }, [selectedPatternItems, patternsHaveMetadata]);
+
+  /** Required deps grouped by bank with sizes looked up from backup data. */
+  const requiredByBank = useMemo(() => {
+    const groups: Record<string, { padNumber: number; size: number }[]> = {};
+    for (const dep of requiredDeps) {
+      const sampleEntry = backupDetails?.samples?.[dep.bankLetter]?.find(
+        (s) => s.pad === dep.padNumber
+      );
+      if (!groups[dep.bankLetter]) groups[dep.bankLetter] = [];
+      groups[dep.bankLetter].push({ padNumber: dep.padNumber, size: sampleEntry?.size ?? 0 });
+    }
+    return groups;
+  }, [requiredDeps, backupDetails]);
+
+  const requiredTotalSize = useMemo(() => {
+    let total = 0;
+    for (const [bank, pads] of Object.entries(requiredByBank)) {
+      for (const { padNumber, size } of pads) {
+        const key = `${bank}-${padNumber}`;
+        if (!excludedPads.has(key)) total += size;
+      }
+    }
+    return total;
+  }, [requiredByBank, excludedPads]);
+
+  const activeSampleSize = useMemo(() => {
+    if (patternsHaveMetadata) return requiredTotalSize;
+    return backupDetails?.selectedSampleSize ?? 0;
+  }, [patternsHaveMetadata, requiredTotalSize, backupDetails]);
+
+  const sessionCount = useMemo(
+    () => Math.max(1, Math.ceil(activeSampleSize / MAX_SESSION_BYTES)),
+    [activeSampleSize]
+  );
+
+  /** Session groupings for the legacy (no-metadata) bank selector info box. */
+  const legacySessionBatches = useMemo((): { banks: string[]; size: number }[] => {
+    if (!backupDetails?.samples) return [];
+    const batches: { banks: string[]; size: number }[] = [];
+    let cur: string[] = [];
+    let curSize = 0;
+    for (const [bankId, samples] of Object.entries(backupDetails.samples)) {
+      const bankSize = samples.filter((s) => s.selected).reduce((a, s) => a + s.size, 0);
+      if (cur.length > 0 && curSize + bankSize > MAX_SESSION_BYTES) {
+        batches.push({ banks: cur, size: curSize });
+        cur = [];
+        curSize = 0;
+      }
+      cur.push(bankId.toUpperCase());
+      curSize += bankSize;
+    }
+    if (cur.length > 0) batches.push({ banks: cur, size: curSize });
+    return batches;
+  }, [backupDetails]);
+
+  // ── Selection summary (BPM/scale/length range) ─────────────────────────────
+
+  const selectionSummary = useMemo(() => {
+    const withMeta = selectedPatternItems.filter((p) => p.metadata);
+    if (withMeta.length === 0) return null;
+    const tempos = withMeta.map((p) => p.metadata!.tempo);
+    const scales = withMeta.map((p) => p.metadata!.scale);
+    const lengths = withMeta.map((p) => p.metadata!.length);
+    return [
+      summarizeRange(tempos, (v) => `${v} BPM`),
+      summarizeRange(scales, (v) => SCALE_NAMES[v] ?? String(v)),
+      summarizeRange(lengths, (v) => `${v} steps`),
+    ].filter(Boolean).join(" · ");
+  }, [selectedPatternItems]);
+
+  // ── Confirm ────────────────────────────────────────────────────────────────
+
   const handleConfirm = () => {
     if (!backupDetails) return;
-    const selectedPatterns = backupDetails.patterns?.filter((p) => p.selected).map((p) => p.id) || [];
+    const selectedPatterns = backupDetails.patterns?.filter((p) => p.selected).map((p) => p.id) ?? [];
+
+    if (patternsHaveMetadata && !skipSamples) {
+      // Build selection from required deps minus excluded pads
+      const selectedSampleBanks: string[] = [];
+      const selectedSamples: Record<string, string[]> = {};
+      const bankSizes: Record<string, number> = {};
+
+      for (const [bank, pads] of Object.entries(requiredByBank)) {
+        const activePads = pads.filter((pad) => !excludedPads.has(`${bank}-${pad.padNumber}`));
+        if (activePads.length === 0) continue;
+        selectedSampleBanks.push(bank);
+        selectedSamples[bank] = activePads.flatMap(({ padNumber }) =>
+          (backupDetails.samples?.[bank]?.filter((s) => s.pad === padNumber) ?? []).map((e) => e.name)
+        );
+        bankSizes[bank] = activePads
+          .flatMap(({ padNumber }) => backupDetails.samples?.[bank]?.filter((s) => s.pad === padNumber) ?? [])
+          .reduce((s, e) => s + e.size, 0);
+      }
+
+      onConfirm({
+        includePatterns: includePatterns && selectedPatterns.length > 0,
+        includeSamples: selectedSampleBanks.length > 0,
+        selectedPatterns,
+        selectedSampleBanks,
+        selectedSamples,
+        bankSizes,
+      });
+      return;
+    }
+
+    // Legacy path (no metadata or skipSamples)
     const selectedSampleBanks = Object.keys(backupDetails.samples || {}).filter((id) =>
       backupDetails.samples![id].some((s) => s.selected)
     );
     const selectedSamples: Record<string, string[]> = {};
+    const bankSizes: Record<string, number> = {};
     Object.keys(backupDetails.samples || {}).forEach((id) => {
-      const sel = backupDetails.samples![id].filter((s) => s.selected).map((s) => s.name);
-      if (sel.length) selectedSamples[id] = sel;
+      const bankItems = backupDetails.samples![id];
+      const sel = bankItems.filter((s) => s.selected);
+      if (sel.length) selectedSamples[id] = sel.map((s) => s.name);
+      bankSizes[id] = sel.reduce((sum, s) => sum + s.size, 0);
     });
     onConfirm({
       includePatterns: includePatterns && selectedPatterns.length > 0,
@@ -188,16 +346,24 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
       selectedPatterns,
       selectedSampleBanks,
       selectedSamples,
+      bankSizes,
     });
   };
+
+  const activeDepCount = useMemo(
+    () => requiredDeps.filter((d) => !excludedPads.has(`${d.bankLetter}-${d.padNumber}`)).length,
+    [requiredDeps, excludedPads]
+  );
 
   const canConfirm =
     backupDetails &&
     ((includePatterns && backupDetails.patterns?.some((p) => p.selected)) ||
       (includeSamples &&
-        Object.values(backupDetails.samples || {}).some((b) => b.some((s) => s.selected))));
-
-  const isOverThreshold = backupDetails && backupDetails.selectedSampleSize > SIZE_THRESHOLD;
+        (skipSamples
+          ? false
+          : patternsHaveMetadata
+          ? activeDepCount > 0
+          : Object.values(backupDetails.samples || {}).some((b) => b.some((s) => s.selected)))));
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -224,15 +390,7 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
               <p>Loading backup details…</p>
             ) : backupDetails ? (
               <>
-                {isOverThreshold && (
-                  <div className="info-box" style={{ marginBottom: 10 }}>
-                    <p>
-                      Selected samples exceed 10MB ({formatSize(backupDetails.selectedSampleSize)}).
-                      You may need to power cycle the device during restore.
-                    </p>
-                  </div>
-                )}
-
+                {/* ── Patterns ── */}
                 {backupDetails.patterns && backupDetails.patterns.length > 0 && (
                   <div className="restore-modal-section">
                     <div
@@ -252,6 +410,11 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
                       >
                         Patterns ({backupDetails.patterns.length} items,{" "}
                         {formatSize(backupDetails.selectedPatternSize)})
+                        {selectionSummary && (
+                          <span className="selection-meta" style={{ marginLeft: 8 }}>
+                            · {selectionSummary}
+                          </span>
+                        )}
                       </label>
                       <section className="field-row" style={{ marginLeft: "auto" }}>
                         <button className="btn" onClick={(e) => { e.stopPropagation(); selectAllPatterns(); }} disabled={!includePatterns}>All</button>
@@ -260,58 +423,147 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
                     </div>
                     {includePatterns && (
                       <div className="restore-modal-content">
-                        {backupDetails.patterns.map((p) => (
-                          <div key={p.id} className="field-row" style={{ marginBottom: 2 }}>
-                            <input
-                              type="checkbox"
-                              id={`rp-${p.id}`}
-                              checked={p.selected}
-                              onChange={() => togglePattern(p.id)}
-                            />
-                            <label htmlFor={`rp-${p.id}`}>
-                              {p.name} — Bank {p.bank}, P{p.pattern} ({formatSize(p.size)})
-                            </label>
-                          </div>
-                        ))}
+                        {backupDetails.patterns.map((p) => {
+                          const meta = p.metadata;
+                          return (
+                            <div key={p.id} className="field-row" style={{ marginBottom: 2 }}>
+                              <input
+                                type="checkbox"
+                                id={`rp-${p.id}`}
+                                checked={p.selected}
+                                onChange={() => togglePattern(p.id)}
+                              />
+                              <label htmlFor={`rp-${p.id}`}>
+                                {p.name} — Bank {p.bank}, P{p.pattern} ({formatSize(p.size)})
+                                {meta && (
+                                  <span className="pattern-chip-meta" style={{ marginLeft: 6 }}>
+                                    {meta.tempo} BPM · {SCALE_NAMES[meta.scale] ?? meta.scale} · {meta.length} steps
+                                  </span>
+                                )}
+                              </label>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 )}
 
+                {/* ── Samples — pattern-centric when metadata present ── */}
                 {backupDetails.samples && Object.keys(backupDetails.samples).length > 0 && (
                   <div className="restore-modal-section">
                     <div
                       className="restore-modal-section-header"
-                      onClick={() => setIncludeSamples((v) => !v)}
+                      onClick={() => !patternsHaveMetadata && setIncludeSamples((v) => !v)}
                     >
-                      <input
-                        type="checkbox"
-                        id="restore-include-samples"
-                        checked={includeSamples}
-                        onChange={(e) => setIncludeSamples(e.target.checked)}
-                        onClick={(e) => e.stopPropagation()}
-                      />
+                      {!patternsHaveMetadata && (
+                        <input
+                          type="checkbox"
+                          id="restore-include-samples"
+                          checked={includeSamples}
+                          onChange={(e) => setIncludeSamples(e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
                       <label
                         htmlFor="restore-include-samples"
                         onClick={(e) => e.stopPropagation()}
+                        style={{ fontWeight: patternsHaveMetadata ? 600 : undefined }}
                       >
-                        Samples ({Object.keys(backupDetails.samples).length} banks,{" "}
-                        {formatSize(backupDetails.selectedSampleSize)})
+                        {patternsHaveMetadata
+                          ? `Samples used by selected patterns`
+                          : `Samples (${Object.keys(backupDetails.samples).length} banks, ${formatSize(backupDetails.selectedSampleSize)})`}
                       </label>
-                      <section className="field-row" style={{ marginLeft: "auto" }}>
-                        <button className="btn" onClick={(e) => { e.stopPropagation(); selectAllSamples(); }} disabled={!includeSamples}>All</button>
-                        <button className="btn" onClick={(e) => { e.stopPropagation(); clearAllSamples(); }} disabled={!includeSamples}>None</button>
-                      </section>
+                      {patternsHaveMetadata && !skipSamples && (
+                        <button
+                          className="btn"
+                          style={{ marginLeft: "auto", fontSize: 11 }}
+                          onClick={(e) => { e.stopPropagation(); setSkipSamples(true); }}
+                        >
+                          Skip samples
+                        </button>
+                      )}
+                      {!patternsHaveMetadata && (
+                        <section className="field-row" style={{ marginLeft: "auto" }}>
+                          <button className="btn" onClick={(e) => { e.stopPropagation(); selectAllSamples(); }} disabled={!includeSamples}>All</button>
+                          <button className="btn" onClick={(e) => { e.stopPropagation(); clearAllSamples(); }} disabled={!includeSamples}>None</button>
+                        </section>
+                      )}
                     </div>
-                    {includeSamples && (
-                      <div className="restore-modal-content">
-                        <div className="info-box" style={{ marginBottom: 8, fontSize: 11 }}>
-                          <p style={{ margin: 0 }}>
-                            <strong>Banks A–D:</strong> Hold <strong>[SAMPLING]</strong> while powering on (Session 1)
-                            <br />
-                            <strong>Banks E–H:</strong> Hold <strong>[SAMPLING]</strong> while powering on again (Session 2)
-                          </p>
+
+                    {/* Pattern-centric required samples */}
+                    {patternsHaveMetadata && (
+                      skipSamples ? (
+                        <div className="restore-modal-content" style={{ color: "#666", fontSize: 12 }}>
+                          Samples skipped — assuming samples are already on device.{" "}
+                          <button
+                            className="btn"
+                            style={{ fontSize: 11 }}
+                            onClick={() => setSkipSamples(false)}
+                          >
+                            Include samples
+                          </button>
                         </div>
+                      ) : requiredDeps.length === 0 ? (
+                        <div className="restore-modal-content" style={{ fontSize: 12, fontStyle: "italic" }}>
+                          No sample dependencies detected in selected patterns.
+                        </div>
+                      ) : (
+                        <div className="restore-modal-content">
+                          {Object.entries(requiredByBank).sort().map(([bank, pads]) => (
+                            <div key={bank} style={{ marginBottom: 6 }}>
+                              <strong>Bank {bank}</strong>
+                              <div style={{ paddingLeft: 12, marginTop: 2 }}>
+                                {pads.map(({ padNumber, size }) => {
+                                  const key = `${bank}-${padNumber}`;
+                                  const excluded = excludedPads.has(key);
+                                  return (
+                                    <div key={padNumber} className="field-row" style={{ marginBottom: 2 }}>
+                                      <input
+                                        type="checkbox"
+                                        id={`restore-pad-${key}`}
+                                        checked={!excluded}
+                                        onChange={() => {
+                                          setExcludedPads((prev) => {
+                                            const next = new Set(prev);
+                                            if (excluded) next.delete(key); else next.add(key);
+                                            return next;
+                                          });
+                                        }}
+                                      />
+                                      <label htmlFor={`restore-pad-${key}`}>
+                                        Pad {padNumber}
+                                        {size > 0 && <span style={{ color: "#666", marginLeft: 4 }}>({formatSize(size)})</span>}
+                                      </label>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{ marginTop: 8, fontSize: 12 }}>
+                            Total: {formatSize(activeSampleSize)}
+                            {activeSampleSize > MAX_SESSION_BYTES
+                              ? ` — will require ${sessionCount} sessions`
+                              : " ✓ fits in one session"}
+                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {/* Legacy bank-level selector (no metadata) */}
+                    {!patternsHaveMetadata && includeSamples && (
+                      <div className="restore-modal-content">
+                        {legacySessionBatches.length > 0 && (
+                          <div className="info-box" style={{ marginBottom: 8, fontSize: 11 }}>
+                            {legacySessionBatches.map((batch, i) => (
+                              <p key={i} style={{ margin: i === 0 ? 0 : "4px 0 0" }}>
+                                <strong>Session {i + 1} — Banks {batch.banks.join(", ")} ({formatSize(batch.size)}):</strong>{" "}
+                                Hold <strong>[SAMPLING]</strong> while powering on
+                              </p>
+                            ))}
+                          </div>
+                        )}
                         {Object.entries(backupDetails.samples).map(([bankId, samples]) => (
                           <div key={bankId} style={{ marginBottom: 8 }}>
                             <div className="field-row" style={{ marginBottom: 4 }}>
@@ -327,13 +579,22 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
                             </div>
                           </div>
                         ))}
+                        {backupDetails.selectedSampleSize > MAX_SESSION_BYTES && (
+                          <div style={{ fontSize: 12, color: "#c00" }}>
+                            Total: {formatSize(backupDetails.selectedSampleSize)} — will require {sessionCount} sessions
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
               </>
             ) : (
-              <p>Failed to load backup details.</p>
+              <div>
+                <p>Failed to load backup details.</p>
+                {loadError && <p style={{ fontSize: 12, fontStyle: "italic" }}>{loadError}</p>}
+                <button className="btn" onClick={loadBackupDetails}>Retry</button>
+              </div>
             )}
             </div>
 

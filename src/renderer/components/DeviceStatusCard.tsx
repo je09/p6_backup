@@ -108,9 +108,9 @@ export const DeviceStatusCard: React.FC<DeviceStatusCardProps> = ({
           </div>
         )}
 
-      {deviceStatus.connected && deviceStatus.mode === "unknown" && (
+      {deviceStatus.connected && (deviceStatus.mode === "unknown" || deviceStatus.mode === "normal") && (
         <div className="info-box" style={{ marginTop: 8 }}>
-          <p>Power off and hold while powering on:</p>
+          <p>{deviceStatus.mode === "normal" ? "Device is in normal mode. Power off and hold while powering on:" : "Power off and hold while powering on:"}</p>
           <p>
             • <strong>PLAY</strong> = Pattern backup &nbsp;•{" "}
             <strong>RECORD</strong> = Pattern restore

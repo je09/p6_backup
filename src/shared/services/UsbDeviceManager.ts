@@ -1,4 +1,3 @@
-import { SerialPort } from "serialport";
 import * as usb from "usb";
 import { Device } from "usb";
 import { exec as execCb } from "child_process";
@@ -129,7 +128,7 @@ export class UsbDeviceManager {
               if (volume.includes("P-6")) {
                 devices.push({
                   vendorId: 0x0582,
-                  productId: 0x0000,
+                  productId: 0x0300,
                   manufacturer: "Roland",
                   product: "P6 (Mass Storage)",
                   path: `/Volumes/${volume}`,
@@ -149,12 +148,12 @@ export class UsbDeviceManager {
             .split("\n")
             .filter(Boolean)
             .forEach((line: string) => {
-              if (line.includes("P6") || line.includes("Roland")) {
+              if (line.includes("P-6")) {
                 const match = line.match(/([A-Z]:)/);
                 if (match) {
                   devices.push({
                     vendorId: 0x0582,
-                    productId: 0x0000,
+                    productId: 0x0300,
                     manufacturer: "Roland",
                     product: "P6 (Mass Storage)",
                     path: match[1],
@@ -194,6 +193,17 @@ export class UsbDeviceManager {
         }
       });
     });
+  }
+
+  isP6UsbConnected(): boolean {
+    try {
+      if (!usb || typeof usb.getDeviceList !== "function") return false;
+      return usb.getDeviceList().some(
+        (d) => d.deviceDescriptor.idVendor === UsbDeviceManager.ROLAND_VENDOR_ID
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async getStringDescriptorWithTimeout(
@@ -255,7 +265,7 @@ export class UsbDeviceManager {
             }
             if (contents.includes("IMPORT"))
               return { path: devicePath, mode: "sample_import" };
-            return { path: devicePath, mode: "unknown" };
+            return { path: devicePath, mode: "normal" };
           }
         } catch {}
       }

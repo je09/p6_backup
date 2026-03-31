@@ -49,7 +49,7 @@ declare global {
   interface Window {
     electronAPI: {
       backupPatterns(customName?: string, patternIds?: string[]): Promise<BackupResult>;
-      backupSamples(bankId?: string, customName?: string): Promise<BackupResult>;
+      backupSamples(bankId?: string, customName?: string, padNumbers?: number[]): Promise<BackupResult>;
       backup(options: {
         includePatterns?: boolean;
         includeSamples?: boolean;

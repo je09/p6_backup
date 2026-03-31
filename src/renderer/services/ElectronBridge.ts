@@ -12,7 +12,7 @@ export class ElectronBridge implements IElectronBridge {
 
   // Backup & Restore
   backupPatterns(customName?: string, patternIds?: string[]) { return this.api.backupPatterns(customName, patternIds); }
-  backupSamples(bankId?: string, customName?: string) { return this.api.backupSamples(bankId, customName); }
+  backupSamples(bankId?: string, customName?: string, padNumbers?: number[]) { return this.api.backupSamples(bankId, customName, padNumbers); }
   organizeBackup(options: Parameters<IElectronBridge["organizeBackup"]>[0]) { return this.api.organizeBackup(options); }
   restorePatterns(backupPath: string, patternIds?: string[]) { return this.api.restorePatterns(backupPath, patternIds); }
   restoreSamples(backupPath: string, bankId?: string, sampleNames?: string[]) { return this.api.restoreSamples(backupPath, bankId, sampleNames); }

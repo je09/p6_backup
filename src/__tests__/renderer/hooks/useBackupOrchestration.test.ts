@@ -202,6 +202,7 @@ describe("handleContinue — samples stage", () => {
 
     expect((window as any).electronAPI.backupSamples).toHaveBeenCalledWith(
       "a",
+      undefined,
       undefined
     );
   });

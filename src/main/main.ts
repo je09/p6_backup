@@ -28,16 +28,28 @@ class MainApplication {
   constructor() {
     this.fileSystemService = new FileSystemService(
       (event: string, ...args: any[]) =>
-        this.mainWindow?.webContents.send(event, ...args)
+        this.mainWindow?.webContents.send(event, ...args),
     );
     const usbManager = new UsbDeviceManager();
-    const modeDetector = new ModeDetector(usbManager, { logLevel: "info", enableAutoRetry: true });
-    this.p6Device = new P6Device(usbManager, modeDetector, this.fileSystemService);
+    const modeDetector = new ModeDetector(usbManager, {
+      logLevel: "info",
+      enableAutoRetry: true,
+    });
+    this.p6Device = new P6Device(
+      usbManager,
+      modeDetector,
+      this.fileSystemService,
+    );
     this.modeService = new ModeService(this.p6Device);
-    this.backupService = new BackupService(this.p6Device, this.fileSystemService);
-    this.backupDiscoveryService = new BackupDiscoveryService(this.fileSystemService);
+    this.backupService = new BackupService(
+      this.p6Device,
+      this.fileSystemService,
+    );
+    this.backupDiscoveryService = new BackupDiscoveryService(
+      this.fileSystemService,
+    );
     this.p6Device.onStatusChanged((status) =>
-      this.mainWindow?.webContents.send("device:status-changed", status)
+      this.mainWindow?.webContents.send("device:status-changed", status),
     );
     this.setupEventHandlers();
   }
@@ -47,8 +59,8 @@ class MainApplication {
       process.platform === "darwin"
         ? path.join(__dirname, "../assets/app.icns")
         : process.platform === "win32"
-        ? path.join(__dirname, "../assets/icon.png")
-        : path.join(__dirname, "../assets/icons/icon-512.png");
+          ? path.join(__dirname, "../assets/icon.png")
+          : path.join(__dirname, "../assets/icons/icon-512.png");
     const isDebugging = this.isDebugMode();
     this.mainWindow = new BrowserWindow({
       height: 580,
@@ -80,8 +92,8 @@ class MainApplication {
       (event, errorCode, errorDescription, validatedURL) =>
         logger.error(
           "MainProcess",
-          `Failed to load: ${errorDescription} (${errorCode}) for URL: ${validatedURL}`
-        )
+          `Failed to load: ${errorDescription} (${errorCode}) for URL: ${validatedURL}`,
+        ),
     );
     this.mainWindow.on("closed", () => {
       this.mainWindow = null;
@@ -93,12 +105,12 @@ class MainApplication {
   private isDebugMode(): boolean {
     const debugArgs = ["--debug", "--inspect", "--inspect-brk", "--usb-debug"];
     const hasDebugArg = process.argv.some((arg) =>
-      debugArgs.some((debugArg) => arg.includes(debugArg))
+      debugArgs.some((debugArg) => arg.includes(debugArg)),
     );
     const debugEnvVars = ["DEBUG", "ELECTRON_IS_DEV"];
     const hasDebugEnv = debugEnvVars.some((envVar) => process.env[envVar]);
     const hasRemoteDebugPort = process.argv.some((arg) =>
-      arg.includes("--remote-debugging-port")
+      arg.includes("--remote-debugging-port"),
     );
     const isInspected =
       typeof process.env.NODE_OPTIONS === "string" &&
@@ -192,72 +204,81 @@ class MainApplication {
     ipcMain.handle("window:close", () => app.quit());
     ipcMain.handle("window:minimize", () => this.mainWindow?.minimize());
 
-    ipcMain.handle("backup:patterns", async (_, customName?: string, patternIds?: string[]) =>
-      this.backupService
-        .backupPatterns(customName, patternIds)
-        .catch(handleError("Pattern backup failed"))
+    ipcMain.handle(
+      "backup:patterns",
+      async (_, customName?: string, patternIds?: string[]) =>
+        this.backupService
+          .backupPatterns(customName, patternIds)
+          .catch(handleError("Pattern backup failed")),
     );
     ipcMain.handle(
       "backup:samples",
-      async (_, bankId?: string, customName?: string) =>
+      async (_, bankId?: string, customName?: string, padNumbers?: number[]) =>
         this.backupService
-          .backupSamples(bankId, customName)
-          .catch(handleError("Sample backup failed"))
+          .backupSamples(bankId, customName, padNumbers)
+          .catch(handleError("Sample backup failed")),
     );
     ipcMain.handle("backup:create", async (_, options) =>
       this.backupService.backup(options).catch((error) => {
         logger.error("MainProcess", "Backup failed", undefined, error as Error);
         throw new Error(`Backup failed: ${error}`);
-      })
+      }),
     );
     ipcMain.handle("backup:organize", async (_, options) =>
       this.backupService.organizeBackup(options).catch((error) => {
-        logger.error("MainProcess", "Organize backup failed", undefined, error as Error);
+        logger.error(
+          "MainProcess",
+          "Organize backup failed",
+          undefined,
+          error as Error,
+        );
         throw new Error(`Organize backup failed: ${error}`);
-      })
+      }),
     );
-    ipcMain.handle("restore:patterns", async (_, backupPath: string, patternIds?: string[]) =>
-      this.backupService
-        .restorePatterns(backupPath, patternIds)
-        .catch(handleError("Pattern restore failed"))
+    ipcMain.handle(
+      "restore:patterns",
+      async (_, backupPath: string, patternIds?: string[]) =>
+        this.backupService
+          .restorePatterns(backupPath, patternIds)
+          .catch(handleError("Pattern restore failed")),
     );
     ipcMain.handle(
       "restore:samples",
       async (_, backupPath: string, bankId?: string, sampleNames?: string[]) =>
         this.backupService
           .restoreSamples(backupPath, bankId, sampleNames)
-          .catch(handleError("Sample restore failed"))
+          .catch(handleError("Sample restore failed")),
     );
     ipcMain.handle("device:detect", async () => this.p6Device.detect());
     ipcMain.handle("device:getStatus", async () => this.p6Device.getStatus());
     ipcMain.handle("device:getCurrentBanks", async () =>
-      this.p6Device.getCurrentBanks()
+      this.p6Device.getCurrentBanks(),
     );
     ipcMain.handle("device:getCurrentBank", async () =>
-      this.p6Device.getCurrentBank()
+      this.p6Device.getCurrentBank(),
     );
     ipcMain.handle("device:hasBankInfo", async () =>
-      this.p6Device.hasBankInfo()
+      this.p6Device.hasBankInfo(),
     );
     ipcMain.handle("device:getCurrentPatterns", async () =>
-      this.p6Device.readData("patterns").catch(() => [])
+      this.p6Device.readData("patterns").catch(() => []),
     );
     ipcMain.handle("device:getCurrentMode", async () =>
-      this.p6Device.getCurrentMode()
+      this.p6Device.getCurrentMode(),
     );
     ipcMain.handle(
       "device:checkModeRequirement",
       async (_, operation: string) =>
-        this.modeService.getOperationModeRequirement(operation)
+        this.modeService.getOperationModeRequirement(operation),
     );
     ipcMain.handle(
       "device:waitForMode",
       async (_, requiredMode: string, timeoutMs?: number) =>
-        this.modeService.waitForMode(requiredMode as any, timeoutMs)
+        this.modeService.waitForMode(requiredMode as any, timeoutMs),
     );
     ipcMain.handle("device:eject", async () => this.p6Device.ejectDevice());
     ipcMain.handle("device:retryModeDetection", async () =>
-      this.p6Device.retryModeDetection()
+      this.p6Device.retryModeDetection(),
     );
     ipcMain.handle("fs:selectBackupLocation", async () => {
       const result = await dialog.showOpenDialog(this.mainWindow!, {
@@ -283,35 +304,43 @@ class MainApplication {
           "MainProcess",
           "Failed to discover backups",
           undefined,
-          error as Error
+          error as Error,
         );
         throw new Error(`Failed to discover backups: ${error}`);
-      })
+      }),
     );
     ipcMain.handle("fs:getBackupDetails", async (_, backupPath: string) =>
-      this.backupDiscoveryService.getBackupDetails(backupPath).catch((error) => {
-        logger.error(
-          "MainProcess",
-          "Failed to get backup details",
-          undefined,
-          error as Error
-        );
-        throw new Error(`Failed to get backup details: ${error}`);
-      })
+      this.backupDiscoveryService
+        .getBackupDetails(backupPath)
+        .catch((error) => {
+          logger.error(
+            "MainProcess",
+            "Failed to get backup details",
+            undefined,
+            error as Error,
+          );
+          throw new Error(`Failed to get backup details: ${error}`);
+        }),
     );
-    ipcMain.handle("fs:renameBackup", async (_, backupPath: string, newName: string) => {
-      const manifestPath = path.join(backupPath, "manifest.json");
-      let manifest: any = {};
-      try {
-        const raw = await fs.promises.readFile(manifestPath, "utf-8");
-        manifest = JSON.parse(raw);
-      } catch {
-        // If manifest doesn't exist, create a minimal one
-      }
-      manifest.displayName = newName;
-      await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-      return backupPath;
-    });
+    ipcMain.handle(
+      "fs:renameBackup",
+      async (_, backupPath: string, newName: string) => {
+        const manifestPath = path.join(backupPath, "manifest.json");
+        let manifest: any = {};
+        try {
+          const raw = await fs.promises.readFile(manifestPath, "utf-8");
+          manifest = JSON.parse(raw);
+        } catch {
+          // If manifest doesn't exist, create a minimal one
+        }
+        manifest.displayName = newName;
+        await fs.promises.writeFile(
+          manifestPath,
+          JSON.stringify(manifest, null, 2),
+        );
+        return backupPath;
+      },
+    );
     ipcMain.handle("log:write", async (_, logEntry: any) => {
       try {
         const { level, component, message, data, stack } = logEntry;
@@ -323,21 +352,21 @@ class MainApplication {
               component,
               message,
               data,
-              stack ? new Error(stack) : undefined
+              stack ? new Error(stack) : undefined,
             ),
           ERROR: () =>
             logger.error(
               component,
               message,
               data,
-              stack ? new Error(stack) : undefined
+              stack ? new Error(stack) : undefined,
             ),
           FATAL: () =>
             logger.fatal(
               component,
               message,
               data,
-              stack ? new Error(stack) : undefined
+              stack ? new Error(stack) : undefined,
             ),
         };
         logMap[level]?.();
@@ -346,13 +375,13 @@ class MainApplication {
           "MainProcess",
           "Failed to write log entry",
           undefined,
-          error as Error
+          error as Error,
         );
       }
     });
     ipcMain.handle("log:getLevel", async () => logger.getLogLevel());
     ipcMain.handle("log:setLevel", async (_, level: number) =>
-      logger.setLogLevel(level as LogLevel)
+      logger.setLogLevel(level as LogLevel),
     );
     ipcMain.handle("log:getDirectory", async () => logger.getLogDirectory());
     ipcMain.handle("log:getFiles", async () => logger.getLogFiles());
@@ -371,10 +400,10 @@ class MainApplication {
     if (this.isDebugMode()) {
       globalShortcut.register("F12", () => this.toggleDevTools());
       globalShortcut.register("CommandOrControl+Shift+I", () =>
-        this.toggleDevTools()
+        this.toggleDevTools(),
       );
       globalShortcut.register("CommandOrControl+Shift+J", () =>
-        this.toggleDevTools()
+        this.toggleDevTools(),
       );
     }
   }
@@ -395,14 +424,14 @@ class MainApplication {
   private async refreshDeviceStatus(): Promise<void> {
     this.mainWindow?.webContents.send(
       "device:status-changed",
-      this.p6Device.getStatus()
+      this.p6Device.getStatus(),
     );
   }
   private showAbout(): void {
     dialog.showMessageBox(this.mainWindow!, {
       type: "info",
-      title: "About Roland P-6 Backup Tool",
-      message: "Roland P-6 Backup Tool v1.0.0",
+      title: "About Roland P6 Backup Tool",
+      message: "Roland P6 Backup Tool v1.0.0",
       detail:
         "A comprehensive backup and restore solution for Roland P6 patterns and samples.",
     });
@@ -439,7 +468,7 @@ const mainApp = new MainApplication();
       "MainProcess",
       "Failed to initialize application",
       undefined,
-      error as Error
+      error as Error,
     );
     app.quit();
   }

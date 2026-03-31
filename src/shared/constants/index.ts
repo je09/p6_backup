@@ -16,14 +16,14 @@ export const DEVICE_CONSTANTS = {
 
   MODE_INSTRUCTIONS: {
     pattern:
-      "For pattern backup: Hold PLAY button while powering on. For pattern restore: Hold RECORD button while powering on.",
+      "For pattern backup: Hold [ø] while powering on. For pattern restore: Hold [SAMPLING] while powering on.",
     sample:
-      "For sample backup: Hold BANK + SAMPLING buttons while powering on. For sample restore: Hold SAMPLING button while powering on.",
-    pattern_backup: "Hold the PLAY button while powering on the device",
-    pattern_restore: "Hold the REC button while powering on the device",
+      "For sample export: Hold bank buttons [A/E]–[D/H] while powering on (+ [SAMPLING] for banks E–H). For sample import: Hold [SAMPLING] while powering on.",
+    pattern_backup: "Hold [ø] while powering on the device",
+    pattern_restore: "Hold [SAMPLING] while powering on the device",
     sample_export:
-      "Hold the BANK + SAMPLING buttons while powering on the device",
-    sample_import: "Hold the SAMPLING button while powering on the device",
+      "Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H)",
+    sample_import: "Hold [SAMPLING] while powering on the device",
     unknown: "Please power on the device normally",
   } as Record<string, string>,
 

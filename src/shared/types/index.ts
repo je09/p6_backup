@@ -42,8 +42,9 @@ export type DeviceMode =
   | "pattern_import"
   | "sample_export"
   | "sample_import"
+  | "normal"
   | "unknown";
-export type ConnectionType = "usb" | "midi" | "network";
+export type ConnectionType = "usb";
 
 export interface PatternBackup {
   id: string;
@@ -118,6 +119,8 @@ export interface BackupInfo {
   description: string;
 }
 
+export type { PrmMetadata, SampleDependency } from "../utils/prmParser";
+
 /** A pattern file read from the device's BACKUP directory. */
 export interface PatternInfo {
   id: string;
@@ -126,6 +129,8 @@ export interface PatternInfo {
   name: string;
   path: string;
   size: number;
+  /** Populated when PRM content is available (backup or restore load time). */
+  metadata?: import("../utils/prmParser").PrmMetadata;
 }
 
 /** A single WAV sample entry inside a bank. */

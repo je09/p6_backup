@@ -6,6 +6,7 @@ import { ERROR_MESSAGES, LOG_MESSAGES } from "../constants/messages";
 import { DATA_TYPES } from "../constants/device";
 import { P6MassStorageInfo } from "../services/UsbDeviceManager";
 import { DeviceStatus, PatternInfo, SampleBankData } from "../types/index";
+import { parsePrmMetadata } from "../utils/prmParser";
 
 export class DeviceDataService {
   private logger = createComponentLogger("DeviceDataService");
@@ -77,6 +78,13 @@ export class DeviceDataService {
           const patternNumber = parseInt(match[2]);
           const filePath = path.join(deviceBackupPath, file);
           const stats = await fs.promises.stat(filePath);
+          let metadata;
+          try {
+            const content = await fs.promises.readFile(filePath, "ascii");
+            metadata = parsePrmMetadata(content);
+          } catch {
+            // metadata stays undefined if file can't be read
+          }
           patterns.push({
             id: `${bankNumber}-${patternNumber}`,
             bank: bankNumber,
@@ -84,6 +92,7 @@ export class DeviceDataService {
             name: file.replace(".PRM", ""),
             path: filePath,
             size: stats.size,
+            metadata,
           });
         }
       }

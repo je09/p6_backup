@@ -1,6 +1,6 @@
 {
   "name": "roland-p6-backup-tool",
-  "version": "1.0.0",
+  "version": "0.7.4",
   "description": "A desktop application for backing up and restoring Roland P6 patterns and samples",
   "main": "dist/main/main.js",
   "scripts": {
@@ -71,8 +71,8 @@
     "usb": "^2.15.0"
   },
   "build": {
-    "appId": "com.roland.p6backup",
-    "productName": "P-6 BackupTool",
+    "appId": "com.je09.p6backup",
+    "productName": "P6 BackupTool",
     "directories": {
       "output": "release"
     },

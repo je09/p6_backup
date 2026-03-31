@@ -37,7 +37,7 @@ export interface BackupDetails {
 
 export interface IBackupBridge {
   backupPatterns(customName?: string, patternIds?: string[]): Promise<BackupResult>;
-  backupSamples(bankId?: string, customName?: string): Promise<BackupResult>;
+  backupSamples(bankId?: string, customName?: string, padNumbers?: number[]): Promise<BackupResult>;
   organizeBackup(options: {
     includePatterns?: boolean;
     includeSamples?: boolean;

@@ -1,7 +1,0 @@
-- Rename shouldn't rename the folder, but the name of the backup, renaming folder breaks the paths in json
-- On restore backup screen size of the samples isn't calculated correctly (shows 0b)
-- When restoring the next batch of samples and sampler is connected second time, it shows other backups, maybe would be vise to shift the waiting screen on different modal. This screen that waits, should contain info about currently restored backup only
-- When restoring samples and patterns it should show dialog about both being successfully restored
-- The click icon should appear only above the tabs, no all the tab area
-- When making a backup if only samples are chosen to copy, or and pattern - copy just samples and pattern do not wait for the whole process
-- Mode switch doesn't update current mode in the modal, but the continue button appears

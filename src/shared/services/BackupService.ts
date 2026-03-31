@@ -46,8 +46,8 @@ export class BackupService {
     return this.patternService.backupPatterns(customName, patternIds);
   }
 
-  backupSamples(bankId?: string, customName?: string): Promise<BackupResult> {
-    return this.sampleService.backupSamples(bankId, customName);
+  backupSamples(bankId?: string, customName?: string, padNumbers?: number[]): Promise<BackupResult> {
+    return this.sampleService.backupSamples(bankId, customName, padNumbers);
   }
 
   restorePatterns(backupPath: string, patternIds?: string[]): Promise<RestoreResult> {

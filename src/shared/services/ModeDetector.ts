@@ -62,8 +62,18 @@ export class ModeDetector {
   async detectModeQuick(): Promise<ModeDetectionResult> {
     try {
       const massStorageInfo = await this.usbManager.checkP6MassStorageMode();
-      if (!massStorageInfo)
+      if (!massStorageInfo) {
+        if (this.usbManager.isP6UsbConnected()) {
+          return {
+            mode: DEVICE_MODES.NORMAL,
+            confidence: "high",
+            massStorageInfo: null,
+            detectionMethod: "direct",
+            timestamp: new Date(),
+          };
+        }
         return this.failure("No mass storage device found", "direct");
+      }
       const mode = this.mapMassStorageMode(massStorageInfo.mode);
       return {
         mode,
@@ -122,24 +132,32 @@ export class ModeDetector {
   getModeInstructions(mode: DeviceMode): string[] {
     const instructions: Record<DeviceMode, string[]> = {
       pattern: [
-        "PLAY button = Pattern backup mode",
-        "RECORD button = Pattern restore mode",
+        "Hold [ø] while powering on = Pattern backup mode",
+        "Hold [SAMPLING] while powering on = Pattern restore / sample import mode",
       ],
       pattern_export: [
-        "Hold PLAY button while powering on for pattern backup mode",
+        "Hold [ø] while powering on to enter pattern backup mode",
       ],
       pattern_import: [
-        "Hold RECORD button while powering on for pattern restore mode",
+        "Hold [SAMPLING] while powering on to enter pattern restore mode",
       ],
       sample: [
-        "BANK + SAMPLING buttons = Sample export mode",
-        "SAMPLE button = Sample import mode",
+        "Hold bank buttons [A/E]–[D/H] while powering on = Sample export (banks A–D)",
+        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on = Sample export (banks E–H)",
+        "Hold [SAMPLING] while powering on = Sample import mode",
       ],
       sample_export: [
-        "Hold BANK + SAMPLING buttons while powering on for sample export mode",
+        "Hold bank buttons [A/E]–[D/H] while powering on to export banks A–D",
+        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on to export banks E–H",
       ],
       sample_import: [
-        "Hold SAMPLE button while powering on for sample import mode",
+        "Hold [SAMPLING] while powering on to enter sample import mode",
+      ],
+      normal: [
+        "Hold [ø] while powering on = Pattern backup mode",
+        "Hold [SAMPLING] while powering on = Pattern restore / sample import mode",
+        "Hold bank buttons [A/E]–[D/H] while powering on = Sample export (banks A–D)",
+        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on = Sample export (banks E–H)",
       ],
       unknown: [
         "Please power on the device normally",
