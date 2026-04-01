@@ -74,7 +74,8 @@ export function useBackupOrchestration({
         );
         setShowBackupGuide(true);
       } else {
-        throw new Error("No banks selected for backup");
+        showSnackbar("No banks selected for backup", "error");
+        return;
       }
     },
     []
@@ -218,6 +219,10 @@ export function useBackupOrchestration({
         }
 
         const currentBank = bankQueue[currentBankIndex];
+        if (!currentBank) {
+          showSnackbar("Internal error: bank index out of range", "error");
+          return;
+        }
         try {
           const deviceCurrentBank = await window.electronAPI.getCurrentBank();
           const availableBanks = await window.electronAPI.getCurrentBanks();

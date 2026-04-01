@@ -1,7 +1,6 @@
 export interface BackupResult {
   success: boolean;
   backupPath: string;
-  type: BackupType;
   timestamp: Date;
   itemCount: number;
   message: string;
@@ -9,14 +8,9 @@ export interface BackupResult {
 
 export interface RestoreResult {
   success: boolean;
-  type: BackupType;
   itemCount: number;
   message: string;
   timestamp: Date;
-}
-
-export enum BackupType {
-  BACKUP = "backup",
 }
 
 export enum OperationStatus {

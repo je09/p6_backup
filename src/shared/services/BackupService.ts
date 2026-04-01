@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BackupResult, RestoreResult, BackupType, PatternInfo, SampleBankData, SampleFileInfo, BackupStageResult } from "../types/index";
+import { BackupResult, RestoreResult, PatternInfo, SampleBankData, SampleFileInfo, BackupStageResult } from "../types/index";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
 import { IDeviceConnection } from "./interfaces";
@@ -188,7 +188,6 @@ export class BackupService {
       return {
         success: true,
         backupPath: backupDir,
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: totalItemCount,
         message: `Backup completed: ${messages.join(", ")}`,
@@ -197,7 +196,6 @@ export class BackupService {
       return {
         success: false,
         backupPath: "",
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: 0,
         message: `Backup failed: ${error}`,
@@ -284,7 +282,6 @@ export class BackupService {
       return {
         success: true,
         backupPath: backupDir,
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: totalItemCount,
         message: `Backup completed: ${messages.join(", ")}`,
@@ -293,7 +290,6 @@ export class BackupService {
       return {
         success: false,
         backupPath: "",
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: 0,
         message: `Backup organization failed: ${error}`,

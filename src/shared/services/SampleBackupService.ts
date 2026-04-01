@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BackupResult, RestoreResult, BackupType, SampleBankData, SampleFileInfo } from "../types/index";
+import { BackupResult, RestoreResult, SampleBankData, SampleFileInfo } from "../types/index";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
 import { IDeviceConnection } from "./interfaces";
@@ -136,7 +136,6 @@ export class SampleBackupService {
       return {
         success: true,
         backupPath: backupDir,
-        type: bankId ? BackupType.BACKUP : BackupType.BACKUP,
         timestamp: new Date(),
         itemCount,
         message: bankId
@@ -148,7 +147,6 @@ export class SampleBackupService {
       return {
         success: false,
         backupPath: "",
-        type: bankId ? BackupType.BACKUP : BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: 0,
         message: `Sample backup failed: ${error instanceof Error ? error.message : error}`,
@@ -226,7 +224,6 @@ export class SampleBackupService {
 
       return {
         success: true,
-        type: bankId ? BackupType.BACKUP : BackupType.BACKUP,
         itemCount,
         message,
         timestamp: new Date(),
@@ -234,7 +231,6 @@ export class SampleBackupService {
     } catch (error) {
       return {
         success: false,
-        type: bankId ? BackupType.BACKUP : BackupType.BACKUP,
         itemCount: 0,
         message: `Sample restore failed: ${error instanceof Error ? error.message : error}`,
         timestamp: new Date(),

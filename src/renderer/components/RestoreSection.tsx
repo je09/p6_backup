@@ -347,7 +347,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       let result: RestoreResult = {
         success: true,
         message: "",
-        type: "COMBINED" as any,
         itemCount: 0,
         timestamp: new Date(),
       };
@@ -622,7 +621,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
         message: results.every((r) => r.success)
           ? results.map((r) => r.message).join("\n")
           : results.find((r) => !r.success)?.message ?? "Restore failed",
-        type: "SAMPLES_BANK" as any,
         itemCount: results.reduce((sum, r) => sum + (r.itemCount || 0), 0),
         timestamp: new Date(),
       };

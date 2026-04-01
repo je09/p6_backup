@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import * as path from "path";
-import { BackupResult, RestoreResult, BackupType, PatternInfo } from "../types/index";
+import { BackupResult, RestoreResult, PatternInfo } from "../types/index";
 import { parsePrmMetadata } from "../utils/prmParser";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
@@ -66,7 +66,6 @@ export class PatternBackupService {
       return {
         success: true,
         backupPath: backupDir,
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: patternsWithBackupPaths.length,
         message: `Successfully backed up ${patternsWithBackupPaths.length} patterns`,
@@ -75,7 +74,6 @@ export class PatternBackupService {
       return {
         success: false,
         backupPath: "",
-        type: BackupType.BACKUP,
         timestamp: new Date(),
         itemCount: 0,
         message: `Pattern backup failed: ${error instanceof Error ? error.message : error}`,
@@ -123,7 +121,6 @@ export class PatternBackupService {
 
       return {
         success: true,
-        type: BackupType.BACKUP,
         itemCount: patterns.length,
         message: `Successfully restored ${patterns.length} patterns`,
         timestamp: new Date(),
@@ -131,7 +128,6 @@ export class PatternBackupService {
     } catch (error) {
       return {
         success: false,
-        type: BackupType.BACKUP,
         itemCount: 0,
         message: `Pattern restore failed: ${error instanceof Error ? error.message : error}`,
         timestamp: new Date(),
