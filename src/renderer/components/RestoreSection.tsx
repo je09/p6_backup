@@ -431,7 +431,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
             message: chunkResults.every((r) => r.success)
               ? chunkResults.map((r) => r.message).join("\n")
               : chunkResults.find((r) => !r.success)?.message ?? "Restore failed",
-            type: "COMBINED" as any,
             itemCount: chunkResults.reduce(
               (sum, r) => sum + (r.itemCount || 0),
               0,
@@ -486,7 +485,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
           message: chunkResults.every((r) => r.success)
             ? chunkResults.map((r) => r.message).join("\n")
             : chunkResults.find((r) => !r.success)?.message ?? "Restore failed",
-          type: "SAMPLES_BANK" as any,
           itemCount: chunkResults.reduce(
             (sum, r) => sum + (r.itemCount || 0),
             0,
