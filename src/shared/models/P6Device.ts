@@ -19,12 +19,13 @@ import { FileSystemService } from "../services/FileSystemService";
 import { DeviceConnectionService } from "../services/DeviceConnectionService";
 import { DeviceDataService } from "../services/DeviceDataService";
 import { IDeviceConnection } from "../services/interfaces";
+import { logger } from "../services/Logger";
 import * as usb from "usb";
 
 import * as fs from "fs";
-import { exec as execCb } from "child_process";
+import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
-const execAsync = promisify(execCb);
+const execFileAsync = promisify(execFileCb);
 
 export interface DeviceInfoResult {
   status: DeviceStatus;
@@ -285,18 +286,24 @@ export class P6Device implements IDeviceConnection {
   async ejectDevice(): Promise<boolean> {
     const mountPath = this.massStorageInfo?.path;
     if (mountPath) {
-      let cmd = "";
-      if (process.platform === "darwin") {
-        cmd = `diskutil eject "${mountPath}"`;
-      } else if (process.platform === "linux") {
-        cmd = `umount "${mountPath}"`;
-      } else if (process.platform === "win32") {
-        cmd = `mountvol "${mountPath}" /D`;
-      }
-      if (cmd) {
+      // Volume labels are device-supplied, so the path must never reach a
+      // shell. execFile passes it as a single argv entry instead.
+      const ejectCommands: Record<string, [string, string[]]> = {
+        darwin: ["diskutil", ["eject", mountPath]],
+        linux: ["umount", [mountPath]],
+        win32: ["mountvol", [mountPath, "/D"]],
+      };
+      const command = ejectCommands[process.platform];
+      if (command) {
         try {
-          await execAsync(cmd);
-        } catch {
+          await execFileAsync(command[0], command[1]);
+        } catch (error) {
+          logger.warn(
+            "P6Device",
+            `Failed to eject device at ${mountPath}`,
+            undefined,
+            error as Error,
+          );
           return false;
         }
       }

@@ -13,10 +13,17 @@ jest.mock("fs");
 jest.mock("fs/promises", () => ({
   stat: jest.fn().mockResolvedValue({ isDirectory: () => true }),
 }));
+// Keeps ejectDevice from shelling out to a real diskutil/umount during tests.
+jest.mock("child_process", () => ({
+  execFile: jest.fn((_cmd, _args, cb) => cb(null, { stdout: "", stderr: "" })),
+}));
 jest.mock("../../../shared/services/Logger", () => ({
   createComponentLogger: () => ({
     info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn(),
   }),
+  logger: {
+    info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn(), fatal: jest.fn(),
+  },
 }));
 
 // Import AFTER mocking to get the mock constructors
@@ -59,9 +66,19 @@ describe("P6Device", () => {
     ConnSvcMock.prototype.connectDevice.mockResolvedValue(null);
   });
 
+  // The constructor starts an auto-detection interval, so every device built
+  // here has to be disposed or the interval keeps the Jest worker alive.
+  const devices: P6Device[] = [];
+
+  afterEach(() => {
+    while (devices.length) devices.pop()!.dispose();
+  });
+
   function makeDevice(): P6Device {
     const fss = new (FileSystemService as any)() as jest.Mocked<FileSystemService>;
-    return new P6Device(usbManager, modeDetector, fss);
+    const device = new P6Device(usbManager, modeDetector, fss);
+    devices.push(device);
+    return device;
   }
 
   describe("constructor wiring", () => {

@@ -73,7 +73,6 @@ class MainApplication {
         contextIsolation: true,
         preload: path.join(__dirname, "preload.js"),
         devTools: isDebugging,
-        webSecurity: !isDebugging,
       },
       titleBarStyle: "hidden",
       backgroundColor: "#808080",
@@ -102,27 +101,10 @@ class MainApplication {
     this.setupMenu();
   }
 
+  // A packaged build is never a debug build, regardless of the environment
+  // it is launched from. Everything else is a local dev run.
   private isDebugMode(): boolean {
-    const debugArgs = ["--debug", "--inspect", "--inspect-brk", "--usb-debug"];
-    const hasDebugArg = process.argv.some((arg) =>
-      debugArgs.some((debugArg) => arg.includes(debugArg)),
-    );
-    const debugEnvVars = ["DEBUG", "ELECTRON_IS_DEV"];
-    const hasDebugEnv = debugEnvVars.some((envVar) => process.env[envVar]);
-    const hasRemoteDebugPort = process.argv.some((arg) =>
-      arg.includes("--remote-debugging-port"),
-    );
-    const isInspected =
-      typeof process.env.NODE_OPTIONS === "string" &&
-      process.env.NODE_OPTIONS.includes("--inspect");
-    const isNpmDev = process.cwd().includes("p6_backup");
-    return (
-      hasDebugArg ||
-      hasDebugEnv ||
-      hasRemoteDebugPort ||
-      isInspected ||
-      isNpmDev
-    );
+    return !app.isPackaged;
   }
 
   private setupMenu(): void {
@@ -325,6 +307,7 @@ class MainApplication {
     ipcMain.handle(
       "fs:renameBackup",
       async (_, backupPath: string, newName: string) => {
+        await this.assertInsideBackupRoot(backupPath);
         const manifestPath = path.join(backupPath, "manifest.json");
         let manifest: any = {};
         try {
@@ -438,7 +421,7 @@ class MainApplication {
     dialog.showMessageBox(this.mainWindow!, {
       type: "info",
       title: "About Roland P6 Backup Tool",
-      message: "Roland P6 Backup Tool v1.0.0",
+      message: `Roland P6 Backup Tool v${app.getVersion()}`,
       detail:
         "A comprehensive backup and restore solution for Roland P6 patterns and samples.",
     });
@@ -446,6 +429,24 @@ class MainApplication {
   private showUserGuide(): void {
     this.mainWindow?.webContents.send("navigation:show-guide");
   }
+  // The renderer supplies backup paths, so any path it hands back must be
+  // confirmed to sit under the configured backup root before we write to it.
+  private async assertInsideBackupRoot(target: string): Promise<void> {
+    const root = await this.fileSystemService.getDefaultBackupPath();
+    const resolvedRoot = path.resolve(root);
+    const resolvedTarget = path.resolve(target);
+    const contained =
+      resolvedTarget === resolvedRoot ||
+      resolvedTarget.startsWith(resolvedRoot + path.sep);
+    if (!contained) {
+      logger.error(
+        "MainProcess",
+        `Rejected path outside backup root: ${resolvedTarget}`,
+      );
+      throw new Error("Path is outside the backup folder");
+    }
+  }
+
   private settingsPath(): string {
     return path.join(app.getPath("userData"), "settings.json");
   }

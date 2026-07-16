@@ -1,12 +1,12 @@
 import * as usb from "usb";
 import { Device } from "usb";
-import { exec as execCb } from "child_process";
+import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 import { promises as fsPromises, readdirSync } from "fs";
 import * as path from "path";
 import { createComponentLogger } from "./Logger";
 
-const execAsync = promisify(execCb);
+const execFileAsync = promisify(execFileCb);
 
 export interface UsbDeviceInfo {
   vendorId: number;
@@ -117,62 +117,87 @@ export class UsbDeviceManager {
   private async scanMassStorageDevices(
     devices: UsbDeviceInfo[]
   ): Promise<void> {
-    const platformScans: Record<string, () => Promise<void>> = {
-      darwin: async () => {
-        try {
-          const { stdout } = await execAsync("ls /Volumes");
-          stdout
-            .split("\n")
-            .filter(Boolean)
-            .forEach((volume: string) => {
-              if (volume.includes("P-6")) {
-                devices.push({
-                  vendorId: 0x0582,
-                  productId: 0x0300,
-                  manufacturer: "Roland",
-                  product: "P6 (Mass Storage)",
-                  path: `/Volumes/${volume}`,
-                });
-              }
-            });
-        } catch (error) {
-          this.logger.warn("Could not scan volumes", { error });
-        }
-      },
-      win32: async () => {
-        try {
-          const { stdout } = await execAsync(
-            "wmic logicaldisk get caption,volumename"
-          );
-          stdout
-            .split("\n")
-            .filter(Boolean)
-            .forEach((line: string) => {
-              if (line.includes("P-6")) {
-                const match = line.match(/([A-Z]:)/);
-                if (match) {
-                  devices.push({
-                    vendorId: 0x0582,
-                    productId: 0x0300,
-                    manufacturer: "Roland",
-                    product: "P6 (Mass Storage)",
-                    path: match[1],
-                  });
-                }
-              }
-            });
-        } catch (error) {
-          this.logger.warn("Could not scan drives", { error });
-        }
-      },
-    };
     try {
-      if (platformScans[process.platform]) {
-        await platformScans[process.platform]!();
+      for (const volumePath of await this.findP6VolumePaths()) {
+        devices.push({
+          vendorId: UsbDeviceManager.ROLAND_VENDOR_ID,
+          productId: UsbDeviceManager.P6_PRODUCT_ID,
+          manufacturer: "Roland",
+          product: "P6 (Mass Storage)",
+          path: volumePath,
+        });
       }
     } catch (error) {
       this.logger.warn("Mass storage scan not available", { error });
     }
+  }
+
+  /** Matches volume labels the P-6 presents, e.g. "P-6", "P6", "P6 SAMPLES". */
+  private static isP6VolumeLabel(label: string): boolean {
+    return /p-?6/i.test(label);
+  }
+
+  /**
+   * Mount points of every attached volume whose label looks like a P-6. This is
+   * the single source of P6 paths on all platforms — matching on the label
+   * matters on Windows, where enumerating bare drive letters would otherwise
+   * match the system drive.
+   */
+  private async findP6VolumePaths(): Promise<string[]> {
+    const scans: Record<string, () => Promise<string[]>> = {
+      darwin: async () => this.listMatchingSubdirectories(["/Volumes"]),
+      linux: async () =>
+        this.listMatchingSubdirectories([
+          "/media",
+          `/media/${process.env.USER ?? ""}`,
+          "/mnt",
+          "/run/media",
+          `/run/media/${process.env.USER ?? ""}`,
+        ]),
+      win32: async () => this.listWindowsP6Drives(),
+    };
+    const scan = scans[process.platform];
+    if (!scan) return [];
+    try {
+      return await scan();
+    } catch (error) {
+      this.logger.warn("Could not scan volumes", { error });
+      return [];
+    }
+  }
+
+  private listMatchingSubdirectories(roots: string[]): string[] {
+    const matches: string[] = [];
+    for (const root of roots) {
+      try {
+        for (const entry of readdirSync(root)) {
+          if (!UsbDeviceManager.isP6VolumeLabel(entry)) continue;
+          const fullPath = path.join(root, entry);
+          if (!matches.includes(fullPath)) matches.push(fullPath);
+        }
+      } catch {
+        // Root not present on this system — expected, try the next one.
+      }
+    }
+    return matches;
+  }
+
+  private async listWindowsP6Drives(): Promise<string[]> {
+    const { stdout } = await execFileAsync("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName | ConvertTo-Json -Compress",
+    ]);
+    const parsed = JSON.parse(stdout);
+    const drives: Array<{ DeviceID?: string; VolumeName?: string }> =
+      Array.isArray(parsed) ? parsed : [parsed];
+    return drives
+      .filter(
+        (drive) =>
+          drive.DeviceID && UsbDeviceManager.isP6VolumeLabel(drive.VolumeName ?? "")
+      )
+      .map((drive) => drive.DeviceID!);
   }
 
   private async getStringDescriptor(
@@ -224,7 +249,7 @@ export class UsbDeviceManager {
 
   async checkP6MassStorageMode(): Promise<P6MassStorageInfo | null> {
     try {
-      const possiblePaths = this.getPossibleP6Paths();
+      const possiblePaths = await this.getPossibleP6Paths();
       this.logger.debug("Checking possible P6 paths:", possiblePaths);
       for (const devicePath of possiblePaths) {
         try {
@@ -265,7 +290,9 @@ export class UsbDeviceManager {
             }
             if (contents.includes("IMPORT"))
               return { path: devicePath, mode: "sample_import" };
-            return { path: devicePath, mode: "normal" };
+            // A P6 volume with no marker folder tells us nothing about its
+            // mode. Never claim "normal" here — callers act on that.
+            return { path: devicePath, mode: "unknown" };
           }
         } catch {}
       }
@@ -273,31 +300,12 @@ export class UsbDeviceManager {
     return null;
   }
 
-  private getPossibleP6Paths(): string[] {
+  private async getPossibleP6Paths(): Promise<string[]> {
     const paths: string[] = [];
-    if (process.platform === "darwin") {
-      paths.push("/Volumes/P-6");
-      try {
-        readdirSync("/Volumes").forEach((volume: string) => {
-          if (
-            volume.toLowerCase().includes("p6") ||
-            volume.toLowerCase().includes("p-6")
-          ) {
-            const fullPath = `/Volumes/${volume}`;
-            if (!paths.includes(fullPath)) paths.push(fullPath);
-          }
-        });
-      } catch {}
-    } else if (process.platform === "win32") {
-      for (let i = 65; i <= 90; i++) paths.push(`${String.fromCharCode(i)}:`);
-    } else {
-      paths.push(
-        "/media/P6",
-        "/media/Roland",
-        "/mnt/P6",
-        "/mnt/P-6",
-        "/mnt/Roland"
-      );
+    // The conventional mount point, checked first so it wins on ties.
+    if (process.platform === "darwin") paths.push("/Volumes/P-6");
+    for (const discovered of await this.findP6VolumePaths()) {
+      if (!paths.includes(discovered)) paths.push(discovered);
     }
     return paths;
   }

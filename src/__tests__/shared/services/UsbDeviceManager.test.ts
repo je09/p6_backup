@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import { UsbDeviceManager } from "../../../shared/services/UsbDeviceManager";
 
-jest.mock("child_process", () => ({ exec: jest.fn() }));
+jest.mock("child_process", () => ({ execFile: jest.fn() }));
 jest.mock("../../../shared/services/Logger", () => ({
   createComponentLogger: () => ({
     info: jest.fn(),
