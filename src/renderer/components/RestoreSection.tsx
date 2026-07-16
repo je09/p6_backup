@@ -11,29 +11,30 @@ import {
   useRestoreOrchestration,
   RestoreSelection,
 } from "../hooks/useRestoreOrchestration";
+import { formatSize } from "../utils/formatters";
+
+/** Name of the backup being restored, as shown to the user. */
+const backupName = (backupPath: string): string =>
+  backupPath.split(/[\\/]/).filter(Boolean).pop() ?? backupPath;
 
 interface RestoreSectionProps {
   deviceStatus: DeviceStatus;
   onRestoreComplete: (result: RestoreResult) => void;
 }
 
+const formatBackupType = (backup: BackupInfo): string => {
+  const types: string[] = [];
+  if (backup.hasPatterns) types.push("Patterns");
+  if (backup.hasSamples) types.push("Samples");
+  return types.join(" + ") || backup.type;
+};
+
 const BackupListItem: React.FC<{
   backup: BackupInfo;
   selected: boolean;
   onSelect: (backup: BackupInfo) => void;
   onDoubleClick: (backup: BackupInfo) => void;
-  formatBackupType: (backup: BackupInfo) => string;
-  formatBackupSize: (size: number) => string;
-  formatTimestamp: (timestamp: Date) => string;
-}> = ({
-  backup,
-  selected,
-  onSelect,
-  onDoubleClick,
-  formatBackupType,
-  formatBackupSize,
-  formatTimestamp,
-}) => (
+}> = ({ backup, selected, onSelect, onDoubleClick }) => (
   <div
     className={`backup-item${selected ? " selected" : ""}`}
     onClick={() => onSelect(backup)}
@@ -43,11 +44,11 @@ const BackupListItem: React.FC<{
     <div className="backup-item-meta">
       <span>{formatBackupType(backup)}</span>
       <span>{backup.itemCount} items</span>
-      <span>{formatBackupSize(backup.size)}</span>
+      <span>{formatSize(backup.size)}</span>
       {backup.sampleBanks.length > 0 && (
         <span>Banks: {backup.sampleBanks.join(", ")}</span>
       )}
-      <span>{formatTimestamp(backup.timestamp)}</span>
+      <span>{new Date(backup.timestamp).toLocaleString()}</span>
     </div>
     {backup.description && (
       <div className="backup-item-desc">{backup.description}</div>
@@ -62,10 +63,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
   const [availableBackups, setAvailableBackups] = useState<BackupInfo[]>([]);
   const [selectedBackup, setSelectedBackup] = useState<BackupInfo | null>(null);
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
-  const [backupFilter] = useState<"all">("all");
-  const [sortBy, setSortBy] = useState<"timestamp" | "name" | "type">(
-    "timestamp",
-  );
+  const [sortBy, setSortBy] = useState<"timestamp" | "name">("timestamp");
   // Restore selection modal state
   const [showRestoreSelectionModal, setShowRestoreSelectionModal] =
     useState(false);
@@ -120,26 +118,15 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     }
   };
 
-  // Filter and sort backups
-  const filteredAndSortedBackups = React.useMemo(() => {
-    const filtered = availableBackups;
-
-    // Apply sort
-    return [...filtered].sort((a, b) => {
-      switch (sortBy) {
-        case "timestamp":
-          return (
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
-        case "name":
-          return a.name.localeCompare(b.name);
-        case "type":
-          return a.type.localeCompare(b.type);
-        default:
-          return 0;
-      }
-    });
-  }, [availableBackups, backupFilter, sortBy]);
+  const sortedBackups = React.useMemo(
+    () =>
+      [...availableBackups].sort((a, b) =>
+        sortBy === "name"
+          ? a.name.localeCompare(b.name)
+          : new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      ),
+    [availableBackups, sortBy]
+  );
 
   const handleModeSwitchContinue = () => {
     if (!modeSwitchDetails) return;
@@ -193,24 +180,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     await startRestore(selection, selectedBackup.path);
   };
 
-  // Helper functions for formatting backup information
-  const formatBackupSize = (size: number): string => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const formatBackupType = (backup: BackupInfo): string => {
-    const types = [];
-    if (backup.hasPatterns) types.push("Patterns");
-    if (backup.hasSamples) types.push("Samples");
-    return types.join(" + ") || backup.type;
-  };
-
-  const formatTimestamp = (timestamp: Date): string => {
-    return new Date(timestamp).toLocaleString();
-  };
-
   return (
     <div style={{ display: "contents" }}>
       <div className="section-block section-block-fill">
@@ -220,11 +189,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
             <label>Sort:</label>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as "timestamp" | "name")}
             >
               <option value="timestamp">Date</option>
               <option value="name">Name</option>
-              <option value="type">Type</option>
             </select>
             <button
               className="btn"
@@ -238,13 +206,13 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
 
         {isLoadingBackups ? (
           <p>Loading available backups…</p>
-        ) : filteredAndSortedBackups.length === 0 ? (
+        ) : sortedBackups.length === 0 ? (
           <p style={{ fontStyle: "italic", fontSize: 13 }}>
             No backups found. Use the Backup tab to create your first backup.
           </p>
         ) : (
           <div className="backup-list">
-            {filteredAndSortedBackups.map((backup) => (
+            {sortedBackups.map((backup) => (
               <BackupListItem
                 key={backup.path}
                 backup={backup}
@@ -254,9 +222,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                   setSelectedBackup(backup);
                   setShowRestoreSelectionModal(true);
                 }}
-                formatBackupType={formatBackupType}
-                formatBackupSize={formatBackupSize}
-                formatTimestamp={formatTimestamp}
               />
             ))}
           </div>
@@ -329,10 +294,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       Step Complete — Pattern Restore Next
                     </h1>
                     <p style={{ marginBottom: 4 }}>
-                      Restoring:{" "}
-                      <strong>
-                        {restoringPath.split("/").pop()}
-                      </strong>
+                      Restoring: <strong>{backupName(restoringPath)}</strong>
                     </p>
                     <div className="info-box" style={{ margin: "8px 0" }}>
                       <p>
@@ -374,10 +336,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       Step Complete — More Banks to Restore
                     </h1>
                     <p style={{ marginBottom: 4 }}>
-                      Restoring:{" "}
-                      <strong>
-                        {restoringPath.split("/").pop()}
-                      </strong>
+                      Restoring: <strong>{backupName(restoringPath)}</strong>
                     </p>
                     <div className="info-box" style={{ margin: "8px 0" }}>
                       <p>
@@ -567,7 +526,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
         <ModeSwitchModal
           isOpen={modeSwitchDetails !== null}
           requiredMode={modeSwitchDetails.requiredMode}
-          liveMode={deviceStatus.mode ?? "unknown"}
+          liveMode={deviceStatus.mode}
           operation={modeSwitchDetails.operation}
           onCancel={cancelModeSwitch}
           onContinue={handleModeSwitchContinue}

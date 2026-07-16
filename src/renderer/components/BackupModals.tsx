@@ -1,10 +1,11 @@
 import React from "react";
+import { DeviceMode } from "../../shared/types/index";
 import { ModeSwitchModal } from "./ModeSwitchModal";
 import { BackupNameModal } from "./BackupNameModal";
 
 export interface ModeSwitchDetails {
-  currentMode: string;
-  requiredMode: string;
+  currentMode: DeviceMode;
+  requiredMode: DeviceMode;
   operation: string;
   onContinue: () => void;
 }
@@ -18,7 +19,7 @@ export interface BackupNameModalDetails {
 interface BackupModalsProps {
   showModeSwitchModal: boolean;
   modeSwitchDetails: ModeSwitchDetails | null;
-  liveMode: string;
+  liveMode: DeviceMode;
   onModeSwitchContinue: () => void;
   onModeSwitchCancel: () => void;
   showBackupNameModal: boolean;
@@ -42,7 +43,6 @@ export const BackupModals: React.FC<BackupModalsProps> = ({
     {showModeSwitchModal && modeSwitchDetails && (
       <ModeSwitchModal
         isOpen={showModeSwitchModal}
-
         requiredMode={modeSwitchDetails.requiredMode}
         liveMode={liveMode}
         operation={modeSwitchDetails.operation}

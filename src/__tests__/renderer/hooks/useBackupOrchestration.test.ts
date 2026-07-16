@@ -149,7 +149,7 @@ describe("handleContinue — patterns stage", () => {
 
     expect((window as any).electronAPI.backupPatterns).not.toHaveBeenCalled();
     expect(props.showSnackbar).toHaveBeenCalledWith(
-      expect.stringContaining("Wrong mode"),
+      expect.stringMatching(/must be in a (pattern|sample) mode/i),
       "error"
     );
   });
@@ -230,9 +230,11 @@ describe("handleContinue — samples stage", () => {
       await result.current.handleContinue();
     });
 
-    expect((window as any).electronAPI.organizeBackup).toHaveBeenCalledWith(
-      expect.objectContaining({ includePatterns: true, includeSamples: true })
-    );
+    const options = (window as any).electronAPI.organizeBackup.mock.calls[0][0];
+    expect(options.precompletedResults.map((s: any) => s.type)).toEqual([
+      "patterns",
+      "samples",
+    ]);
     expect(result.current.showBackupGuide).toBe(false);
   });
 
@@ -249,7 +251,7 @@ describe("handleContinue — samples stage", () => {
     });
 
     expect(wrongProps.showSnackbar).toHaveBeenCalledWith(
-      expect.stringContaining("Wrong mode"),
+      expect.stringMatching(/must be in a (pattern|sample) mode/i),
       "error"
     );
     expect((window as any).electronAPI.backupSamples).not.toHaveBeenCalled();
@@ -343,13 +345,18 @@ describe("multi-stage backup — patterns then every bank in turn", () => {
 
     expect(API().organizeBackup).toHaveBeenCalledTimes(1);
     const options = API().organizeBackup.mock.calls[0][0];
-    expect(options).toMatchObject({
-      includePatterns: true,
-      includeSamples: true,
-      bankIds: ["a", "b", "c"],
-      customName: "my-backup",
-    });
-    expect(options.precompletedResults).toHaveLength(4); // patterns + 3 banks
+    expect(options).toMatchObject({ customName: "my-backup" });
+    // The stage results are the record of what was captured, in the order the
+    // device sessions ran: patterns first, then one session per bank.
+    expect(options.precompletedResults).toHaveLength(4);
+    expect(options.precompletedResults.map((s: any) => s.type)).toEqual([
+      "patterns", "samples", "samples", "samples",
+    ]);
+    expect(
+      options.precompletedResults
+        .filter((s: any) => s.type === "samples")
+        .map((s: any) => s.bank)
+    ).toEqual(["a", "b", "c"]);
   });
 
   it("ejects between every stage so the user can switch banks", async () => {
@@ -372,9 +379,10 @@ describe("multi-stage backup — patterns then every bank in turn", () => {
     });
 
     expect(API().backupSamples).not.toHaveBeenCalled();
-    expect(API().organizeBackup).toHaveBeenCalledWith(
-      expect.objectContaining({ includePatterns: true, includeSamples: false })
-    );
+    const options = API().organizeBackup.mock.calls[0][0];
+    expect(options.precompletedResults.map((s: any) => s.type)).toEqual([
+      "patterns",
+    ]);
     expect(result.current.showBackupGuide).toBe(false);
   });
 
@@ -494,7 +502,7 @@ describe("multi-stage backup — bank verification before writing", () => {
     });
 
     expect(props.showSnackbar).toHaveBeenCalledWith(
-      expect.stringContaining("Wrong bank"),
+      expect.stringMatching(/currently set to bank/i),
       "error"
     );
     expect(API().backupSamples).not.toHaveBeenCalled();
@@ -549,7 +557,7 @@ describe("multi-stage backup — bank verification before writing", () => {
 
     expect(API().backupSamples).toHaveBeenCalledWith("a", undefined, undefined);
     expect(props.showSnackbar).not.toHaveBeenCalledWith(
-      expect.stringContaining("Wrong bank"),
+      expect.stringMatching(/currently set to bank/i),
       "error"
     );
   });

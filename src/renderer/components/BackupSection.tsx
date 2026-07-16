@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { DeviceStatus, BackupResult } from "../../shared/types/index";
+import { DeviceStatus, DeviceMode, BackupResult } from "../../shared/types/index";
 import { BackupModals } from "./BackupModals";
 import { useSnackbar } from "../context/SnackbarContext";
-import { ERROR_MESSAGES } from "../../shared/constants";
-import { ModeError } from "../../shared/errors/ModeError";
+import {
+  ERROR_MESSAGES,
+  MODE_ENTRY_INSTRUCTIONS,
+  DEVICE_MODES,
+  isPatternMode,
+  isSampleMode,
+} from "../../shared/constants";
 import { createComponentLogger } from "../utils/logger";
 import { useBackupOrchestration } from "../hooks/useBackupOrchestration";
 import { useBackupState } from "../hooks/useBackupState";
@@ -44,14 +49,12 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     isLoadingPatterns,
   } = useBackupState(deviceStatus);
 
-  const canBackupPatterns = ["pattern", "pattern_export", "pattern_import"].includes(
-    deviceStatus.mode || ""
-  );
+  const canBackupPatterns = isPatternMode(deviceStatus.mode);
 
   const [showModeSwitchModal, setShowModeSwitchModal] = useState(false);
   const [modeSwitchDetails, setModeSwitchDetails] = useState<{
-    currentMode: string;
-    requiredMode: string;
+    currentMode: DeviceMode;
+    requiredMode: DeviceMode;
     operation: string;
     onContinue: () => void;
   } | null>(null);
@@ -83,7 +86,6 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     currentBankIndex,
     backupMode,
     startBackup,
-    resetProgress,
     handleContinue,
     handleCancel,
   } = useBackupOrchestration({
@@ -103,16 +105,9 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
       return;
     }
     if (backupMode === "patterns") {
-      const isReady = ["pattern", "pattern_export", "pattern_import"].includes(
-        deviceStatus.mode || ""
-      );
-      setIsDeviceReadyForContinue(isReady);
+      setIsDeviceReadyForContinue(isPatternMode(deviceStatus.mode));
     } else if (backupMode === "samples") {
-      if (
-        !["sample", "sample_export", "sample_import"].includes(
-          deviceStatus.mode || ""
-        )
-      ) {
+      if (!isSampleMode(deviceStatus.mode)) {
         setIsDeviceReadyForContinue(false);
         return;
       }
@@ -199,53 +194,33 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     const doStart = async (customName?: string) => {
       const resolvedBanks = snapSamples ? depBanks : [];
 
-      // Patterns-only: use direct backup API — no need for multi-step orchestration
+      // Patterns-only needs a single device session, so it skips the guide.
       if (!snapSamples) {
         try {
-          const patternIds = snapPatternIds.length > 0 ? snapPatternIds : undefined;
-          const result = await window.electronAPI.backupPatterns(customName, patternIds);
+          const result = await window.electronAPI.backupPatterns(
+            customName,
+            snapPatternIds.length > 0 ? snapPatternIds : undefined
+          );
           onBackupComplete(result);
           if (result.success) {
-            setResultDialog({ type: "success", title: "Backup Complete", message: customName ? `Saved as: ${customName}` : "Your backup has been saved successfully." });
+            setResultDialog({
+              type: "success",
+              title: "Backup Complete",
+              message: customName
+                ? `Saved as: ${customName}`
+                : "Your backup has been saved successfully.",
+            });
           } else {
             showBackupError(result.message || "Backup failed");
           }
         } catch (error: any) {
-          const modeInfo = ModeError.fromError(error);
-          if (modeInfo) {
-            setModeSwitchDetails({
-              currentMode: modeInfo.currentMode,
-              requiredMode: modeInfo.requiredMode,
-              operation: "Pattern Backup",
-              onContinue: () => doStart(customName),
-            });
-            setShowModeSwitchModal(true);
-            return;
-          }
-          showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
+          showBackupError(error?.message || ERROR_MESSAGES.UNKNOWN_ERROR);
         }
         return;
       }
 
-      // Patterns + samples: use multi-step orchestration
-      try {
-        startBackup(resolvedBanks, "patterns", customName, snapPatternIds, snapBankPads);
-      } catch (error: any) {
-        const modeInfo = ModeError.fromError(error);
-        if (modeInfo) {
-          setModeSwitchDetails({
-            currentMode: modeInfo.currentMode,
-            requiredMode: modeInfo.requiredMode,
-            operation: "Backup",
-            onContinue: () => doStart(customName),
-          });
-          setShowModeSwitchModal(true);
-          return;
-        }
-        showBackupError(error.message || ERROR_MESSAGES.UNKNOWN_ERROR);
-      } finally {
-        resetProgress();
-      }
+      // Patterns + samples: hand off to the multi-session orchestration.
+      startBackup(resolvedBanks, "patterns", customName, snapPatternIds, snapBankPads);
     };
 
     setBackupNameModalDetails({
@@ -281,24 +256,21 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
   const getDeviceStatusHint = () => {
     if (isBackingUp) return null;
     if (!deviceStatus.connected) return "Device not connected.";
-    if (!isDeviceReadyForContinue) {
-      if (backupMode === "patterns")
-        return "Switch device to Pattern Mode (hold PLAY while powering on).";
-      if (backupMode === "samples")
-        return `Select Bank ${bankQueue[currentBankIndex]?.toUpperCase()} on the device.`;
-      return "Device not ready.";
-    }
-    return null;
+    if (isDeviceReadyForContinue) return null;
+    if (backupMode === "patterns")
+      return `Switch device to Pattern Backup mode: ${MODE_ENTRY_INSTRUCTIONS[DEVICE_MODES.PATTERN_EXPORT]}.`;
+    if (backupMode === "samples")
+      return `Select Bank ${bankQueue[currentBankIndex]?.toUpperCase()} on the device.`;
+    return "Device not ready.";
   };
 
   const getButtonDisabledReason = () => {
     if (!deviceStatus.connected) return "Device must be connected";
-    if (backupMode === "patterns") {
-      if (!["pattern", "pattern_export", "pattern_import"].includes(deviceStatus.mode || ""))
-        return "Device must be in Pattern mode (hold PLAY while powering on)";
-    } else if (backupMode === "samples") {
-      if (!["sample", "sample_export", "sample_import"].includes(deviceStatus.mode || ""))
-        return "Device must be in Sample mode (hold BANK + SAMPLING while powering on)";
+    if (backupMode === "patterns" && !isPatternMode(deviceStatus.mode))
+      return `Device must be in a pattern mode — ${MODE_ENTRY_INSTRUCTIONS[DEVICE_MODES.PATTERN_EXPORT]}`;
+    if (backupMode === "samples") {
+      if (!isSampleMode(deviceStatus.mode))
+        return `Device must be in a sample mode — ${MODE_ENTRY_INSTRUCTIONS[DEVICE_MODES.SAMPLE_EXPORT]}`;
       return `Device must have bank ${bankQueue[currentBankIndex]?.toUpperCase()} selected`;
     }
     return "Device not ready";
@@ -394,7 +366,7 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
       <BackupModals
         showModeSwitchModal={showModeSwitchModal}
         modeSwitchDetails={modeSwitchDetails}
-        liveMode={deviceStatus.mode ?? "unknown"}
+        liveMode={deviceStatus.mode}
         onModeSwitchContinue={handleModeSwitchContinue}
         onModeSwitchCancel={handleModeSwitchCancel}
         showBackupNameModal={showBackupNameModal}

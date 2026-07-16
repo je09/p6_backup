@@ -4,10 +4,10 @@
  * boundaries wrong means either a failed import or more power-cycles than
  * necessary.
  */
-import {
-  buildBatchesBySize,
-  MAX_SAMPLE_BATCH_BYTES,
-} from "../../../renderer/hooks/useRestoreOrchestration";
+import { buildBatchesBySize } from "../../../renderer/hooks/useRestoreOrchestration";
+import { BACKUP_CONSTANTS } from "../../../shared/constants";
+
+const { MAX_SESSION_BYTES } = BACKUP_CONSTANTS;
 
 const MB = 1024 * 1024;
 
@@ -37,7 +37,7 @@ describe("buildBatchesBySize", () => {
   it("fills a batch exactly to the limit without splitting", () => {
     const batches = buildBatchesBySize(["a", "b"], {
       a: 6 * MB,
-      b: MAX_SAMPLE_BATCH_BYTES - 6 * MB,
+      b: MAX_SESSION_BYTES - 6 * MB,
     });
     expect(batches).toEqual([["a", "b"]]);
   });
@@ -45,7 +45,7 @@ describe("buildBatchesBySize", () => {
   it("splits when the total is one byte over the limit", () => {
     const batches = buildBatchesBySize(["a", "b"], {
       a: 6 * MB,
-      b: MAX_SAMPLE_BATCH_BYTES - 6 * MB + 1,
+      b: MAX_SESSION_BYTES - 6 * MB + 1,
     });
     expect(batches).toEqual([["a"], ["b"]]);
   });
@@ -82,7 +82,7 @@ describe("buildBatchesBySize", () => {
     for (const batch of batches) {
       const total = batch.reduce((sum, b) => sum + sizes[b], 0);
       // Only a lone oversized bank may exceed the limit.
-      if (batch.length > 1) expect(total).toBeLessThanOrEqual(MAX_SAMPLE_BATCH_BYTES);
+      if (batch.length > 1) expect(total).toBeLessThanOrEqual(MAX_SESSION_BYTES);
     }
   });
 });
