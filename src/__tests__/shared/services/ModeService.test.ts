@@ -104,34 +104,3 @@ describe("ModeService.getOperationModeRequirement", () => {
   });
 });
 
-describe("ModeService.waitForMode", () => {
-  it("resolves immediately when device already in required mode", async () => {
-    const device = makeDevice("pattern_export");
-    (device.retryModeDetection as jest.Mock).mockResolvedValue("pattern_export");
-    const svc = new ModeService(device, 5000, 100);
-    const result = await svc.waitForMode("pattern_export");
-    expect(result.success).toBe(true);
-    expect(result.finalMode).toBe("pattern_export");
-    expect(result.timedOut).toBe(false);
-  });
-
-  it("times out when device never reaches required mode", async () => {
-    const device = makeDevice("unknown");
-    (device.retryModeDetection as jest.Mock).mockResolvedValue("unknown");
-    const svc = new ModeService(device, 200, 50);
-    const result = await svc.waitForMode("pattern_export");
-    expect(result.success).toBe(false);
-    expect(result.timedOut).toBe(true);
-  });
-
-  it("succeeds when device switches to required mode on second poll", async () => {
-    const device = makeDevice("unknown");
-    (device.retryModeDetection as jest.Mock)
-      .mockResolvedValueOnce("unknown")
-      .mockResolvedValueOnce("sample_export");
-    const svc = new ModeService(device, 5000, 50);
-    const result = await svc.waitForMode("sample_export");
-    expect(result.success).toBe(true);
-    expect(result.finalMode).toBe("sample_export");
-  });
-});

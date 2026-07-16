@@ -62,11 +62,9 @@
   },
   "dependencies": {
     "@sakun/system.css": "^0.1.11",
-    "@types/usb": "^2.0.5",
     "lucide-react": "^0.263.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "usb": "^2.15.0"
+    "react-dom": "^18.3.1"
   },
   "build": {
     "appId": "com.je09.p6backup",
@@ -77,8 +75,7 @@
     "npmRebuild": false,
     "files": [
       "dist/**/*",
-      "assets/**/*",
-      "!node_modules/usb/build/**"
+      "assets/**/*"
     ],
     "mac": {
       "category": "public.app-category.music",

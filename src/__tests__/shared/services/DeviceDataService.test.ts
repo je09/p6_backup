@@ -1,10 +1,8 @@
 import * as fs from "fs";
 import { DeviceDataService } from "../../../shared/services/DeviceDataService";
-import { FileSystemService } from "../../../shared/services/FileSystemService";
 import { DeviceStatus } from "../../../shared/types/index";
 import { P6MassStorageInfo } from "../../../shared/services/UsbDeviceManager";
 
-jest.mock("../../../shared/services/FileSystemService");
 jest.mock("../../../shared/services/Logger", () => ({
   createComponentLogger: () => ({
     info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn(),
@@ -19,8 +17,7 @@ function makeService(
     connected, mode: "pattern_export", connectionType: "usb",
     firmwareVersion: "", deviceId: "", lastSeen: null,
   };
-  const fss = new (FileSystemService as any)() as jest.Mocked<FileSystemService>;
-  return new DeviceDataService(fss, () => status, () => massStorageInfo);
+  return new DeviceDataService(() => status, () => massStorageInfo);
 }
 
 describe("DeviceDataService.readData", () => {

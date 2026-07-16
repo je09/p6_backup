@@ -4,12 +4,12 @@
  * The behaviour modelled here is what the detection stack actually reads, and
  * was confirmed against a physical P-6:
  *
- *  - The device announces itself on the USB bus immediately at power-on, but
- *    the OS does not mount its volume until a second or two later. Code that
- *    looks in that gap sees a device with no volume.
  *  - The mode is not reported by the device. It is inferred purely from which
  *    marker folder the mounted volume exposes.
- *  - In normal mode the device is on the bus but mounts no volume at all.
+ *  - The OS does not mount the volume until a second or two after power-on.
+ *    Code that looks in that gap sees nothing at all.
+ *  - In normal mode the device mounts no volume, so it is indistinguishable
+ *    from a device that is not there.
  *  - The mode is chosen by which button is held at power-on and only changes
  *    across a power cycle.
  *  - Ejecting unmounts the volume while the device stays powered.
@@ -21,9 +21,6 @@ export type P6Mode =
   | "sample_export"
   | "sample_import"
   | "normal";
-
-export const ROLAND_VENDOR_ID = 0x0582;
-export const P6_PRODUCT_ID = 0x0300;
 
 /** Marker folder the device exposes for each mass storage mode. */
 const MARKER_FOLDER: Record<Exclude<P6Mode, "normal">, string> = {
@@ -181,32 +178,10 @@ export class FakeP6 {
     return this;
   }
 
-  /** The device enumerates on the bus as soon as it is powered. */
-  isOnBus(): boolean {
-    return this.poweredOn;
-  }
-
   /** The volume only exists once the OS has had time to mount it. */
   isVolumeMounted(): boolean {
     if (!this.poweredOn || this.ejected || this.mountedAt === null) return false;
     return Date.now() >= this.mountedAt;
-  }
-
-  usbDeviceList(): unknown[] {
-    if (!this.poweredOn) return [];
-    return [
-      {
-        deviceDescriptor: {
-          idVendor: ROLAND_VENDOR_ID,
-          idProduct: P6_PRODUCT_ID,
-          iManufacturer: 0,
-          iProduct: 0,
-          iSerialNumber: 0,
-        },
-        open: () => undefined,
-        close: () => undefined,
-      },
-    ];
   }
 
   /** Contents of the volume root, or of a path beneath it. */

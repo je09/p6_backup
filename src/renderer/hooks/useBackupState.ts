@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { DeviceStatus, PatternInfo } from "../../shared/types/index";
+import { isPatternMode, isSampleMode } from "../../shared/constants";
 import { SampleDependency } from "../../shared/utils/prmParser";
 import { createComponentLogger } from "../utils/logger";
 
@@ -22,24 +23,15 @@ export function useBackupState(deviceStatus: DeviceStatus): BackupState {
 
   useEffect(() => {
     const fetchAvailableBanks = async () => {
-      if (
-        deviceStatus.connected &&
-        (deviceStatus.mode === "sample" ||
-          deviceStatus.mode === "sample_export" ||
-          deviceStatus.mode === "sample_import")
-      ) {
-        try {
-          const banks = await window.electronAPI.getCurrentBanks();
-          if (banks && Array.isArray(banks)) {
-            setAvailableBanks(banks.map((bank) => bank.toLowerCase()));
-          } else {
-            setAvailableBanks([]);
-          }
-        } catch (error) {
-          log.error("Failed to fetch available banks", { error });
-          setAvailableBanks([]);
-        }
-      } else {
+      if (!(deviceStatus.connected && isSampleMode(deviceStatus.mode))) {
+        setAvailableBanks([]);
+        return;
+      }
+      try {
+        const banks = await window.electronAPI.getCurrentBanks();
+        setAvailableBanks(banks?.map((bank) => bank.toLowerCase()) ?? []);
+      } catch (error) {
+        log.error("Failed to fetch available banks", { error });
         setAvailableBanks([]);
       }
     };
@@ -48,31 +40,22 @@ export function useBackupState(deviceStatus: DeviceStatus): BackupState {
 
   useEffect(() => {
     const fetchAvailablePatterns = async () => {
-      if (
-        deviceStatus.connected &&
-        (deviceStatus.mode === "pattern" ||
-          deviceStatus.mode === "pattern_export" ||
-          deviceStatus.mode === "pattern_import")
-      ) {
-        setIsLoadingPatterns(true);
-        try {
-          const patterns = await window.electronAPI.getCurrentPatterns();
-          if (patterns && Array.isArray(patterns)) {
-            setAvailablePatterns(patterns);
-          } else {
-            setAvailablePatterns([]);
-            setSelectedPatterns([]);
-          }
-        } catch (error) {
-          log.error("Failed to fetch available patterns", { error });
-          setAvailablePatterns([]);
-          setSelectedPatterns([]);
-        } finally {
-          setIsLoadingPatterns(false);
-        }
-      } else {
+      if (!(deviceStatus.connected && isPatternMode(deviceStatus.mode))) {
         setAvailablePatterns([]);
         setSelectedPatterns([]);
+        setIsLoadingPatterns(false);
+        return;
+      }
+      setIsLoadingPatterns(true);
+      try {
+        const patterns = await window.electronAPI.getCurrentPatterns();
+        setAvailablePatterns(patterns ?? []);
+        if (!patterns?.length) setSelectedPatterns([]);
+      } catch (error) {
+        log.error("Failed to fetch available patterns", { error });
+        setAvailablePatterns([]);
+        setSelectedPatterns([]);
+      } finally {
         setIsLoadingPatterns(false);
       }
     };

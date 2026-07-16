@@ -1,5 +1,6 @@
 import { DeviceMode } from "../types/index";
-import { IDeviceConnection } from "./interfaces";
+import { DEVICE_MODES } from "../constants/device";
+import { IDeviceStatus } from "./interfaces";
 
 export interface ModeRequirement {
   operation: string;
@@ -7,49 +8,29 @@ export interface ModeRequirement {
   currentMode: DeviceMode;
 }
 
-export interface ModeWaitResult {
-  success: boolean;
-  finalMode: DeviceMode;
-  timedOut: boolean;
-}
+/** The mode each operation needs the device to be power-cycled into. */
+const OPERATION_MODE_MAP = {
+  "pattern backup": DEVICE_MODES.PATTERN_EXPORT,
+  "sample backup": DEVICE_MODES.SAMPLE_EXPORT,
+  "pattern restore": DEVICE_MODES.PATTERN_IMPORT,
+  "sample restore": DEVICE_MODES.SAMPLE_IMPORT,
+} as const satisfies Record<string, DeviceMode>;
 
-const OPERATION_MODE_MAP: Record<string, DeviceMode> = {
-  "pattern backup": "pattern_export",
-  "pattern restore": "pattern_import",
-  "sample backup": "sample_export",
-  "sample restore": "sample_import",
-};
+export type ModeOperation = keyof typeof OPERATION_MODE_MAP;
 
 export class ModeService {
-  constructor(
-    private p6Device: IDeviceConnection,
-    private maxWaitTime: number = 30000,
-    private pollInterval: number = 1000
-  ) {}
+  constructor(private readonly p6Device: IDeviceStatus) {}
 
+  /**
+   * What stands between the device and `operation`: null when it is already in
+   * the right mode, or when the operation has no mode requirement at all.
+   */
   getOperationModeRequirement = (operation: string): ModeRequirement | null => {
-    const requiredMode = OPERATION_MODE_MAP[operation] || "unknown";
-    if (requiredMode === "unknown") return null;
+    const requiredMode = OPERATION_MODE_MAP[operation as ModeOperation];
+    if (!requiredMode) return null;
     const currentMode = this.p6Device.getCurrentMode();
     return currentMode === requiredMode
       ? null
       : { operation, requiredMode, currentMode };
-  };
-
-  waitForMode = async (
-    requiredMode: DeviceMode,
-    timeoutMs?: number
-  ): Promise<ModeWaitResult> => {
-    const timeout = timeoutMs ?? this.maxWaitTime;
-    const start = Date.now();
-    while (true) {
-      // Actively scan for mode change rather than reading stale cached state
-      const detectedMode = await this.p6Device.retryModeDetection();
-      if (detectedMode === requiredMode)
-        return { success: true, finalMode: detectedMode, timedOut: false };
-      if (Date.now() - start >= timeout)
-        return { success: false, finalMode: detectedMode, timedOut: true };
-      await new Promise((r) => setTimeout(r, this.pollInterval));
-    }
   };
 }

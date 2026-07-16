@@ -1,36 +1,19 @@
 import React from "react";
-import { UI_LABELS, MODE_ENTRY_INSTRUCTIONS } from "../../shared/constants";
+import { DeviceMode } from "../../shared/types/index";
+import {
+  UI_LABELS,
+  MODE_ENTRY_INSTRUCTIONS,
+  MODE_LABELS,
+} from "../../shared/constants";
 
 interface ModeSwitchModalProps {
   isOpen: boolean;
-  requiredMode: string;
-  liveMode: string;
+  requiredMode: DeviceMode;
+  liveMode: DeviceMode;
   onCancel: () => void;
   onContinue: () => void;
   operation: string;
 }
-
-const MODE_DISPLAY_NAMES: Record<string, string> = {
-  pattern_export: "Pattern Backup",
-  pattern_import: "Pattern Restore",
-  sample_export:  "Sample Backup",
-  sample_import:  "Sample Restore",
-  pattern:        "Pattern",
-  sample:         "Sample",
-  unknown:        "Unknown",
-};
-
-const MODE_INSTRUCTIONS: Record<string, string> = {
-  ...MODE_ENTRY_INSTRUCTIONS,
-  pattern: UI_LABELS.MODE_INSTRUCTION_PATTERN,
-  sample:  UI_LABELS.MODE_INSTRUCTION_SAMPLE,
-};
-
-const getModeDisplayName = (mode: string): string =>
-  MODE_DISPLAY_NAMES[mode] ?? mode;
-
-const getModeInstructions = (requiredMode: string): string =>
-  MODE_INSTRUCTIONS[requiredMode] ?? UI_LABELS.MODE_INSTRUCTION_DEFAULT(requiredMode);
 
 export const ModeSwitchModal: React.FC<ModeSwitchModalProps> = ({
   isOpen,
@@ -59,34 +42,33 @@ export const ModeSwitchModal: React.FC<ModeSwitchModalProps> = ({
 
             <div className="mode-comparison">
               <div className="mode-box">
-                <div className="mode-label">
-                  {UI_LABELS.CURRENT_MODE_LABEL}
-                </div>
-                <div className="mode-value">
-                  {getModeDisplayName(liveMode)}
-                </div>
+                <div className="mode-label">{UI_LABELS.CURRENT_MODE_LABEL}</div>
+                <div className="mode-value">{MODE_LABELS[liveMode]}</div>
               </div>
               <div className="mode-arrow">→</div>
               <div className="mode-box">
-                <div className="mode-label">
-                  {UI_LABELS.REQUIRED_MODE_LABEL}
-                </div>
-                <div className="mode-value">
-                  {getModeDisplayName(requiredMode)}
-                </div>
+                <div className="mode-label">{UI_LABELS.REQUIRED_MODE_LABEL}</div>
+                <div className="mode-value">{MODE_LABELS[requiredMode]}</div>
               </div>
             </div>
 
             <div className="info-box">
               <p>
                 <strong>{UI_LABELS.MODE_INSTRUCTIONS_LABEL}</strong>{" "}
-                {getModeInstructions(requiredMode)}
+                {MODE_ENTRY_INSTRUCTIONS[requiredMode]}
               </p>
               <p>
-                {isReady
-                  ? <strong>Device is in {getModeDisplayName(requiredMode)} mode — ready to continue.</strong>
-                  : <>Waiting for device to switch to <strong>{getModeDisplayName(requiredMode)}</strong> mode…</>
-                }
+                {isReady ? (
+                  <strong>
+                    Device is in {MODE_LABELS[requiredMode]} mode — ready to
+                    continue.
+                  </strong>
+                ) : (
+                  <>
+                    Waiting for device to switch to{" "}
+                    <strong>{MODE_LABELS[requiredMode]}</strong> mode…
+                  </>
+                )}
               </p>
             </div>
 

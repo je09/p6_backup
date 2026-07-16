@@ -1,7 +1,7 @@
 import { DeviceMode } from "../types/index";
+import { MODE_ENTRY_INSTRUCTIONS, MODE_LABELS } from "../constants/device";
 
-const PREFIX = "MODE_MISMATCH:";
-
+/** The message is shown to the user as-is, so it has to stand on its own. */
 export class ModeError extends Error {
   constructor(
     public readonly currentMode: DeviceMode,
@@ -9,20 +9,9 @@ export class ModeError extends Error {
     public readonly operation: string
   ) {
     super(
-      `${PREFIX}${JSON.stringify({ currentMode, requiredMode, operation })}`
+      `Device is in ${MODE_LABELS[currentMode]} mode, but ${operation} needs ` +
+        `${MODE_LABELS[requiredMode]} mode. ${MODE_ENTRY_INSTRUCTIONS[requiredMode]}.`
     );
     this.name = "ModeError";
-  }
-
-  /** Parse a ModeError from an Error that crossed the IPC boundary. */
-  static fromError(
-    error: Error
-  ): { currentMode: string; requiredMode: string; operation: string } | null {
-    if (!error.message.startsWith(PREFIX)) return null;
-    try {
-      return JSON.parse(error.message.slice(PREFIX.length));
-    } catch {
-      return null;
-    }
   }
 }

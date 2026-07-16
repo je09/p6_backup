@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { DeviceStatus } from "../../shared/types/index";
-import { UI_LABELS } from "../../shared/constants";
+import {
+  UI_LABELS,
+  MODE_ENTRY_INSTRUCTIONS,
+  MODE_LABELS,
+  DEVICE_MODES,
+  isSampleMode,
+} from "../../shared/constants";
 import { createComponentLogger } from "../utils/logger";
 
 interface DeviceStatusCardProps {
@@ -20,8 +26,13 @@ const INITIAL_BANK_INFO: BankInfo = {
   hasBankInfo: false,
 };
 
-const isSampleMode = (mode?: string) =>
-  mode === "sample_export" || mode === "sample_import";
+/** Every mode the user can reach, and what it is for. */
+const MODE_ENTRY_HELP = [
+  DEVICE_MODES.PATTERN_EXPORT,
+  DEVICE_MODES.PATTERN_IMPORT,
+  DEVICE_MODES.SAMPLE_EXPORT,
+  DEVICE_MODES.SAMPLE_IMPORT,
+] as const;
 
 export const DeviceStatusCard: React.FC<DeviceStatusCardProps> = ({
   deviceStatus,
@@ -108,15 +119,16 @@ export const DeviceStatusCard: React.FC<DeviceStatusCardProps> = ({
           </div>
         )}
 
-      {deviceStatus.connected && (deviceStatus.mode === "unknown" || deviceStatus.mode === "normal") && (
+      {deviceStatus.connected && deviceStatus.mode === DEVICE_MODES.UNKNOWN && (
         <div className="info-box" style={{ marginTop: 8 }}>
-          <p>{deviceStatus.mode === "normal" ? "Device is in normal mode. Power off and hold while powering on:" : "Power off and hold while powering on:"}</p>
-          <p>
-            • <strong>PLAY</strong> = Pattern backup &nbsp;•{" "}
-            <strong>RECORD</strong> = Pattern restore
-            <br />• <strong>BANK + SAMPLING</strong> = Sample backup &nbsp;•{" "}
-            <strong>SAMPLE</strong> = Sample restore
-          </p>
+          <p>Power the device off, then hold one of these while powering on:</p>
+          <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
+            {MODE_ENTRY_HELP.map((mode) => (
+              <li key={mode}>
+                {MODE_ENTRY_INSTRUCTIONS[mode]} — <strong>{MODE_LABELS[mode]}</strong>
+              </li>
+            ))}
+          </ul>
           <section
             className="field-row"
             style={{ justifyContent: "flex-end", marginTop: 8 }}

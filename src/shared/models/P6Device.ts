@@ -1,55 +1,29 @@
 import { DeviceStatus, DeviceMode, PatternInfo, SampleBankData } from "../types/index";
 import { DEVICE_CONSTANTS } from "../constants";
-import {
-  DEVICE_STATUS,
-  DEVICE_MODES,
-  MASS_STORAGE_MODE_MAP,
-} from "../constants/device";
+import { DEVICE_STATUS, DEVICE_MODES } from "../constants/device";
 import {
   UsbDeviceManager,
   type UsbDeviceInfo,
   type P6MassStorageInfo,
 } from "../services/UsbDeviceManager";
-import {
-  ModeDetector,
-  type ModeDetectionResult,
-  type ModeDetectionConfig,
-} from "../services/ModeDetector";
-import { FileSystemService } from "../services/FileSystemService";
-import { DeviceConnectionService } from "../services/DeviceConnectionService";
+import { ModeDetector, type ModeDetectionResult } from "../services/ModeDetector";
 import { DeviceDataService } from "../services/DeviceDataService";
 import { IDeviceConnection } from "../services/interfaces";
-import { logger } from "../services/Logger";
-import * as usb from "usb";
+import { createComponentLogger } from "../services/Logger";
 
 import * as fs from "fs";
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 const execFileAsync = promisify(execFileCb);
 
-export interface DeviceInfoResult {
-  status: DeviceStatus;
-  deviceInfo: UsbDeviceInfo | null;
-  massStorageInfo: P6MassStorageInfo | null;
-  modeDetection: {
-    lastResult: ModeDetectionResult | null;
-    config: ModeDetectionConfig;
-    instructions: string[];
-  };
-  capabilities: {
-    patterns: boolean;
-    samples: boolean;
-    realtime: boolean;
-    massStorage: boolean;
-    memoryCard: boolean;
-  };
-  health: {
-    success: boolean;
-    errors: string[];
-    warnings: string[];
-  };
-}
-
+/**
+ * The P-6 as the app sees it: a mass storage volume that comes and goes as the
+ * user power-cycles the device between modes.
+ *
+ * "Connected" means a P-6 volume is mounted. While none is, an auto-detection
+ * poll watches for one; while one is, a connection poll watches for it to
+ * vanish. Only one of the two ever runs.
+ */
 export class P6Device implements IDeviceConnection {
   private status: DeviceStatus;
   private connectionCheckInterval: NodeJS.Timeout | null = null;
@@ -58,35 +32,20 @@ export class P6Device implements IDeviceConnection {
   private modeDetector: ModeDetector;
   private currentDevice: UsbDeviceInfo | null = null;
   private massStorageInfo: P6MassStorageInfo | null = null;
-  private lastModeDetectionResult: ModeDetectionResult | null = null;
-  private fileSystemService: FileSystemService;
-  private connectionService: DeviceConnectionService;
+  private connecting: Promise<boolean> | null = null;
   private dataService: DeviceDataService;
   private onStatusChangedCallback?: (status: DeviceStatus) => void;
+  private logger = createComponentLogger("P6Device");
 
   constructor(
     usbManager?: UsbDeviceManager,
     modeDetector?: ModeDetector,
-    fileSystemService?: FileSystemService,
-    connectionService?: DeviceConnectionService,
     dataService?: DeviceDataService
   ) {
     this.status = { ...DEVICE_STATUS.INITIAL };
-    this.fileSystemService = fileSystemService ?? new FileSystemService();
     this.usbManager = usbManager ?? new UsbDeviceManager();
-    this.modeDetector = modeDetector ?? new ModeDetector(this.usbManager, {
-      logLevel: "info",
-      enableAutoRetry: true,
-    });
-    this.connectionService = connectionService ?? new DeviceConnectionService(this.usbManager);
-    this.connectionService.setOnConnected((device) =>
-      this.handleDeviceConnected(device)
-    );
-    this.connectionService.setOnDisconnected((device) =>
-      this.handleDeviceDisconnected(device)
-    );
+    this.modeDetector = modeDetector ?? new ModeDetector(this.usbManager);
     this.dataService = dataService ?? new DeviceDataService(
-      this.fileSystemService,
       () => this.status,
       () => this.massStorageInfo
     );
@@ -97,192 +56,90 @@ export class P6Device implements IDeviceConnection {
     this.onStatusChangedCallback = callback;
   }
 
-  configureModeDetection(config: Partial<ModeDetectionConfig>): void {
-    this.modeDetector.updateConfig(config);
-  }
-
-  getModeDetectionConfig(): ModeDetectionConfig {
-    return this.modeDetector.getConfig();
-  }
-
-  getLastModeDetectionResult(): ModeDetectionResult | null {
-    return this.lastModeDetectionResult;
-  }
-
   private notifyStatusChanged(): void {
-    if (this.onStatusChangedCallback) {
-      this.onStatusChangedCallback(this.getStatus());
-    }
-  }
-
-  private async handleDeviceConnected(device: UsbDeviceInfo): Promise<void> {
-    try {
-      this.currentDevice = device;
-      this.status.connected = true;
-      this.status.lastSeen = new Date();
-      this.status.mode = await this.detectCurrentMode();
-      this.startConnectionMonitoring();
-      this.stopAutoDetection();
-      this.notifyStatusChanged();
-    } catch (error) {
-      this.status.connected = false;
-      this.status.mode = DEVICE_MODES.UNKNOWN;
-      this.currentDevice = null;
-      this.massStorageInfo = null;
-      this.lastModeDetectionResult = null;
-      this.notifyStatusChanged();
-      this.startAutoDetection();
-    }
-  }
-
-  private async handleDeviceDisconnected(device: UsbDeviceInfo): Promise<void> {
-    if (
-      this.currentDevice &&
-      this.currentDevice.vendorId === device.vendorId &&
-      this.currentDevice.productId === device.productId
-    ) {
-      this.stopConnectionMonitoring();
-      this.status.connected = false;
-      this.status.mode = DEVICE_MODES.UNKNOWN;
-      this.currentDevice = null;
-      this.massStorageInfo = null;
-      this.lastModeDetectionResult = null;
-      this.notifyStatusChanged();
-      this.startAutoDetection();
-    }
-  }
-
-  private mapMassStorageMode(mode: string): DeviceMode {
-    return (
-      MASS_STORAGE_MODE_MAP[mode as keyof typeof MASS_STORAGE_MODE_MAP] || DEVICE_MODES.UNKNOWN
-    );
-  }
-
-  private async detectCurrentMode(): Promise<DeviceMode> {
-    try {
-      const detectionResult = await this.modeDetector.detectMode();
-      this.lastModeDetectionResult = detectionResult;
-      if (detectionResult.massStorageInfo) {
-        this.massStorageInfo = detectionResult.massStorageInfo;
-      }
-      return detectionResult.mode;
-    } catch (error) {
-      return DEVICE_MODES.UNKNOWN;
-    }
-  }
-
-  private async detectCurrentModeQuick(): Promise<DeviceMode> {
-    try {
-      const detectionResult = await this.modeDetector.detectModeQuick();
-      this.lastModeDetectionResult = detectionResult;
-      if (detectionResult.massStorageInfo) {
-        this.massStorageInfo = detectionResult.massStorageInfo;
-      }
-      return detectionResult.mode;
-    } catch (error) {
-      return DEVICE_MODES.UNKNOWN;
-    }
-  }
-
-  async connect(): Promise<boolean> {
-    try {
-      if (this.status.connected) {
-        return true;
-      }
-      this.stopAutoDetection();
-      const device = await this.connectionService.connectDevice();
-      if (device) {
-        await this.handleDeviceConnected(device);
-        return true;
-      } else {
-        this.stopConnectionMonitoring();
-        this.status.connected = false;
-        this.status.mode = DEVICE_MODES.UNKNOWN;
-        this.notifyStatusChanged();
-        this.startAutoDetection();
-        return false;
-      }
-    } catch (error) {
-      this.startAutoDetection();
-      return false;
-    }
-  }
-
-  async isReady(): Promise<boolean> {
-    if (!this.status.connected) {
-      const device = await this.connectionService.connectDevice();
-      if (!device) {
-        return false;
-      }
-      await this.handleDeviceConnected(device);
-    }
-    this.status.mode = await this.detectCurrentModeQuick();
-    this.notifyStatusChanged();
-    if (!this.status.connected) {
-      return false;
-    }
-    return await this.performReadinessCheck();
+    this.onStatusChangedCallback?.(this.getStatus());
   }
 
   getStatus(): DeviceStatus {
     return { ...this.status };
   }
 
-  async getDeviceInfo(): Promise<DeviceInfoResult> {
-    return {
-      status: this.getStatus(),
-      deviceInfo: this.currentDevice,
-      massStorageInfo: this.massStorageInfo,
-      modeDetection: {
-        lastResult: this.lastModeDetectionResult,
-        config: this.modeDetector.getConfig(),
-        instructions: this.modeDetector.getModeInstructions(this.status.mode),
-      },
-      capabilities: {
-        patterns: true,
-        samples: true,
-        realtime: false,
-        massStorage: true,
-        memoryCard: false,
-      },
-      health: {
-        success: await this.performReadinessCheck(),
-        errors: [],
-        warnings: [],
-      },
-    };
-  }
-
   getCurrentMode(): DeviceMode {
     return this.status.mode;
   }
 
-  async detect(): Promise<boolean> {
-    return await this.connect();
-  }
-
   getCurrentBanks(): string[] | null {
-    if (this.massStorageInfo && this.massStorageInfo.banks) {
-      return this.massStorageInfo.banks;
-    }
-    return null;
+    return this.massStorageInfo?.banks ?? null;
   }
 
   getCurrentBank(): string | null {
-    if (this.massStorageInfo && this.massStorageInfo.currentBank) {
-      return this.massStorageInfo.currentBank;
-    }
-    return null;
+    return this.massStorageInfo?.currentBank ?? null;
   }
 
   hasBankInfo(): boolean {
-    return (
-      this.massStorageInfo !== null &&
-      (this.massStorageInfo.banks !== undefined ||
-        this.massStorageInfo.currentBank !== undefined)
-    );
+    return !!(this.massStorageInfo?.banks || this.massStorageInfo?.currentBank);
   }
 
+  async detect(): Promise<boolean> {
+    return this.connect();
+  }
+
+  /**
+   * Attach to a mounted P-6, if there is one. The auto-detection poll and the
+   * user both call this, so concurrent callers share one attempt.
+   */
+  async connect(): Promise<boolean> {
+    if (this.status.connected) return true;
+    this.connecting ??= this.attemptConnect().finally(() => {
+      this.connecting = null;
+    });
+    return this.connecting;
+  }
+
+  private async attemptConnect(): Promise<boolean> {
+    try {
+      const device = await this.findDevice();
+      if (!device) return false;
+      await this.handleDeviceConnected(device);
+      return true;
+    } catch (error) {
+      this.logger.warn("Connect failed", { error });
+      return false;
+    }
+  }
+
+  async isReady(): Promise<boolean> {
+    if (!this.status.connected && !(await this.connect())) return false;
+    this.applyDetection(await this.modeDetector.detectModeQuick());
+    this.notifyStatusChanged();
+    return this.performReadinessCheck();
+  }
+
+  async retryModeDetection(): Promise<DeviceMode> {
+    this.applyDetection(await this.modeDetector.detectMode());
+    this.notifyStatusChanged();
+    return this.status.mode;
+  }
+
+  async readData(
+    dataType: string,
+    parameters?: { bankId?: string }
+  ): Promise<PatternInfo[] | SampleBankData> {
+    return this.dataService.readData(dataType, parameters);
+  }
+
+  async writeData(
+    dataType: string,
+    data: PatternInfo[] | SampleBankData,
+    parameters?: { bankId?: string }
+  ): Promise<boolean> {
+    return this.dataService.writeData(dataType, data, parameters);
+  }
+
+  /**
+   * Unmount the volume through the OS. The device stays powered — this is what
+   * lets the user safely pull it between restore stages.
+   */
   async ejectDevice(): Promise<boolean> {
     const mountPath = this.massStorageInfo?.path;
     if (mountPath) {
@@ -298,148 +155,105 @@ export class P6Device implements IDeviceConnection {
         try {
           await execFileAsync(command[0], command[1]);
         } catch (error) {
-          logger.warn(
-            "P6Device",
-            `Failed to eject device at ${mountPath}`,
-            undefined,
-            error as Error,
-          );
+          this.logger.warn(`Failed to eject device at ${mountPath}`, { error });
           return false;
         }
       }
     }
+    this.markDisconnected();
+    return true;
+  }
+
+  dispose(): void {
+    this.stopAutoDetection();
+    this.stopConnectionMonitoring();
+  }
+
+  // ── Detection ──────────────────────────────────────────────────────────────
+
+  private async findDevice(): Promise<UsbDeviceInfo | null> {
+    const devices = await this.usbManager.scanForP6Devices();
+    return devices[0] ?? null;
+  }
+
+  /** Fold a detection result into the device's state. */
+  private applyDetection(result: ModeDetectionResult): void {
+    if (result.massStorageInfo) this.massStorageInfo = result.massStorageInfo;
+    this.status.mode = result.mode;
+  }
+
+  private async handleDeviceConnected(device: UsbDeviceInfo): Promise<void> {
+    this.currentDevice = device;
+    this.status.connected = true;
+    this.status.lastSeen = new Date();
+    this.applyDetection(await this.modeDetector.detectMode());
+    this.startConnectionMonitoring();
+    this.stopAutoDetection();
+    this.notifyStatusChanged();
+  }
+
+  /** Reset to "no device" and go back to watching for one. */
+  private markDisconnected(): void {
+    this.stopConnectionMonitoring();
     this.status.connected = false;
     this.status.mode = DEVICE_MODES.UNKNOWN;
     this.currentDevice = null;
     this.massStorageInfo = null;
-    this.lastModeDetectionResult = null;
-    this.stopConnectionMonitoring();
     this.notifyStatusChanged();
     this.startAutoDetection();
-    return true;
-  }
-
-  async readData(dataType: string, parameters?: { bankId?: string }): Promise<PatternInfo[] | SampleBankData> {
-    return this.dataService.readData(dataType, parameters);
-  }
-
-  async writeData(
-    dataType: string,
-    data: PatternInfo[] | SampleBankData | string,
-    parameters?: { bankId?: string; bankPath?: string }
-  ): Promise<boolean> {
-    return this.dataService.writeData(dataType, data, parameters);
-  }
-
-  async detectMode(): Promise<DeviceMode> {
-    return this.detectCurrentMode();
-  }
-
-  async retryModeDetection(): Promise<DeviceMode> {
-    const detectionResult = await this.modeDetector.detectMode();
-    this.lastModeDetectionResult = detectionResult;
-    if (detectionResult.massStorageInfo) {
-      this.massStorageInfo = detectionResult.massStorageInfo;
-    }
-    this.status.mode = detectionResult.mode;
-    this.notifyStatusChanged();
-    return detectionResult.mode;
-  }
-
-  async refreshModeDetection(): Promise<DeviceMode> {
-    const detectionResult = await this.modeDetector.refreshAndDetect();
-    this.lastModeDetectionResult = detectionResult;
-    if (detectionResult.massStorageInfo) {
-      this.massStorageInfo = detectionResult.massStorageInfo;
-    }
-    this.status.mode = detectionResult.mode;
-    this.notifyStatusChanged();
-    return detectionResult.mode;
-  }
-
-  async validateModeStability(checkCount: number = 3): Promise<boolean> {
-    if (this.status.mode === DEVICE_MODES.UNKNOWN) {
-      return false;
-    }
-    return this.modeDetector.validateModeStability(
-      this.status.mode,
-      checkCount
-    );
   }
 
   private async performReadinessCheck(): Promise<boolean> {
+    if (!this.status.connected || !this.massStorageInfo) return false;
     try {
-      if (!this.status.connected) {
-        return false;
-      }
-      if (this.massStorageInfo) {
-        try {
-          const stat = await fs.promises.stat(this.massStorageInfo.path);
-          return stat.isDirectory();
-        } catch {
-          return false;
-        }
-      }
-      if (this.currentDevice) {
-        const devices = await this.usbManager.scanForP6Devices();
-        return devices.some(
-          (d) =>
-            d.vendorId === this.currentDevice!.vendorId &&
-            d.productId === this.currentDevice!.productId
-        );
-      }
-      return false;
-    } catch (error) {
+      const stat = await fs.promises.stat(this.massStorageInfo.path);
+      return stat.isDirectory();
+    } catch {
       return false;
     }
   }
 
-  private startConnectionMonitoring(): void {
-    if (this.connectionCheckInterval) {
-      clearInterval(this.connectionCheckInterval);
+  /** Is the volume we connected to still mounted? Refreshes the mode if so. */
+  private async checkConnection(): Promise<boolean> {
+    if (!this.massStorageInfo) return false;
+    try {
+      const current = await this.usbManager.checkP6MassStorageMode();
+      if (!current) return false;
+      this.massStorageInfo = current;
+      this.status.mode = current.mode;
+      return true;
+    } catch {
+      return false;
     }
-    this.connectionCheckInterval = setInterval(async () => {
-      try {
-        const stillConnected = await this.checkConnection();
-        if (!stillConnected) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          const retryConnected = await this.checkConnection();
-          if (!retryConnected) {
-            this.status.connected = false;
-            this.stopConnectionMonitoring();
-            this.notifyStatusChanged();
-            setTimeout(
-              () => this.startAutoDetection(),
-              DEVICE_CONSTANTS.RECONNECTION_DELAY
-            );
-          }
-        } else {
-          this.status.lastSeen = new Date();
-        }
-      } catch (error) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        try {
-          const retryConnected = await this.checkConnection();
-          if (!retryConnected) {
-            this.status.connected = false;
-            this.stopConnectionMonitoring();
-            this.notifyStatusChanged();
-            setTimeout(
-              () => this.startAutoDetection(),
-              DEVICE_CONSTANTS.RECONNECTION_DELAY
-            );
-          }
-        } catch (retryError) {
-          this.status.connected = false;
-          this.stopConnectionMonitoring();
-          this.notifyStatusChanged();
-          setTimeout(
-            () => this.startAutoDetection(),
-            DEVICE_CONSTANTS.RECONNECTION_DELAY
-          );
-        }
-      }
-    }, DEVICE_CONSTANTS.CONNECTION_CHECK_INTERVAL);
+  }
+
+  // ── Polling ────────────────────────────────────────────────────────────────
+
+  private startConnectionMonitoring(): void {
+    this.stopConnectionMonitoring();
+    this.connectionCheckInterval = setInterval(
+      () => void this.monitorConnection(),
+      DEVICE_CONSTANTS.CONNECTION_CHECK_INTERVAL
+    );
+  }
+
+  /**
+   * A single failed check is not enough to call the device gone: the volume
+   * blips while the OS is busy. Only a second failure counts.
+   */
+  private async monitorConnection(): Promise<void> {
+    if (await this.checkConnection()) {
+      this.status.lastSeen = new Date();
+      return;
+    }
+    await new Promise((r) =>
+      setTimeout(r, DEVICE_CONSTANTS.CONNECTION_RETRY_DELAY)
+    );
+    if (await this.checkConnection()) {
+      this.status.lastSeen = new Date();
+      return;
+    }
+    this.markDisconnected();
   }
 
   private stopConnectionMonitoring(): void {
@@ -450,13 +264,16 @@ export class P6Device implements IDeviceConnection {
   }
 
   private startAutoDetection(): void {
-    if (this.autoDetectionInterval) {
-      clearInterval(this.autoDetectionInterval);
-    }
-    this.connectionService.connectDevice();
-    this.autoDetectionInterval = setInterval(async () => {
-      await this.connectionService.connectDevice();
-    }, DEVICE_CONSTANTS.AUTO_DETECTION_INTERVAL);
+    this.stopAutoDetection();
+    void this.pollForDevice();
+    this.autoDetectionInterval = setInterval(
+      () => void this.pollForDevice(),
+      DEVICE_CONSTANTS.AUTO_DETECTION_INTERVAL
+    );
+  }
+
+  private async pollForDevice(): Promise<void> {
+    await this.connect();
   }
 
   private stopAutoDetection(): void {
@@ -464,44 +281,5 @@ export class P6Device implements IDeviceConnection {
       clearInterval(this.autoDetectionInterval);
       this.autoDetectionInterval = null;
     }
-  }
-
-  private async checkConnection(): Promise<boolean> {
-    try {
-      if (this.massStorageInfo) {
-        try {
-          const stat = await fs.promises.stat(this.massStorageInfo.path);
-          if (!stat.isDirectory()) return false;
-          const current = await this.usbManager.checkP6MassStorageMode();
-          if (!current) return false;
-          this.massStorageInfo = current;
-          this.status.mode = this.mapMassStorageMode(current.mode);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-      if (this.currentDevice) {
-        try {
-          const usbDevices = usb.getDeviceList();
-          return usbDevices.some(
-            (d: usb.Device) =>
-              d.deviceDescriptor.idVendor === this.currentDevice?.vendorId &&
-              d.deviceDescriptor.idProduct === this.currentDevice?.productId
-          );
-        } catch {
-          return false;
-        }
-      }
-      return false;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  dispose(): void {
-    this.stopAutoDetection();
-    this.stopConnectionMonitoring();
-    this.usbManager.dispose();
   }
 }

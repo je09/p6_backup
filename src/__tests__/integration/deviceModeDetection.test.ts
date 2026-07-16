@@ -3,9 +3,9 @@
  * ModeDetector rather than mocking them out.
  *
  * The unit tests mock checkP6MassStorageMode directly, so they cannot see the
- * thing that actually broke on hardware: the device is on the USB bus before
- * its volume is mounted. These drive the stack through the same seams the OS
- * does — the filesystem and the USB bus — so that gap is reproducible.
+ * thing that actually broke on hardware: the volume is not mounted the instant
+ * the device is powered on. These drive the stack through the same seam the OS
+ * does — the filesystem — so that gap is reproducible.
  */
 // jest.mock factories are hoisted above imports, so the fake has to be pulled
 // in lazily here rather than through a top-level import binding.
@@ -17,35 +17,25 @@ jest.mock("../../shared/services/Logger", () => ({
   }),
 }));
 
-import * as usb from "usb";
 import { FakeP6, useFakeP6 } from "../helpers/FakeP6";
 import { UsbDeviceManager } from "../../shared/services/UsbDeviceManager";
 import { ModeDetector } from "../../shared/services/ModeDetector";
-
-const getDeviceList = usb.getDeviceList as unknown as jest.Mock;
 
 describe("mode detection against a simulated P-6", () => {
   let p6: FakeP6;
   let manager: UsbDeviceManager;
 
-  function makeDetector(mountSettleMs = 200) {
+  function makeDetector(maxAttempts = 5, baseDelayMs = 1) {
     return new ModeDetector(manager, {
       enableAutoRetry: true,
-      maxAttempts: 5,
-      baseDelayMs: 1,
-      mountSettleMs,
-      logLevel: "error",
+      maxAttempts,
+      baseDelayMs,
     });
   }
 
   beforeEach(() => {
     p6 = useFakeP6(new FakeP6());
     manager = new UsbDeviceManager();
-    getDeviceList.mockImplementation(() => p6.usbDeviceList());
-  });
-
-  afterEach(() => {
-    manager.dispose();
   });
 
   describe("each power-on mode is read from the volume it exposes", () => {
@@ -82,56 +72,61 @@ describe("mode detection against a simulated P-6", () => {
       expect(result.massStorageInfo?.banks).toEqual(["A"]);
     });
 
-    it("reports normal mode when the device mounts no volume", async () => {
+    // A P-6 in normal mode mounts nothing, so there is no volume to read a mode
+    // from — it is indistinguishable from a device that is not plugged in.
+    it("reports unknown when the device mounts no volume", async () => {
       p6.powerOnInto("normal");
 
-      const result = await makeDetector().detectMode();
+      const result = await makeDetector(2).detectMode();
 
-      expect(result.mode).toBe("normal");
+      expect(result.mode).toBe("unknown");
     });
 
     it("reports unknown when the device is powered off", async () => {
       p6.powerOff();
 
-      const result = await makeDetector().detectMode();
+      const result = await makeDetector(2).detectMode();
 
       expect(result.mode).toBe("unknown");
     });
   });
 
-  // The regression that shipped: USB enumerates first, the volume follows.
-  describe("the gap between USB enumeration and the volume mounting", () => {
-    it("does not call a device in sample restore mode 'normal'", async () => {
-      p6 = useFakeP6(new FakeP6({ mountDelayMs: 120 }));
+  // The regression that shipped: the volume arrives after the device does.
+  describe("the gap before the volume mounts", () => {
+    it("waits for a device in sample restore mode rather than giving up", async () => {
+      p6 = useFakeP6(new FakeP6({ mountDelayMs: 20 }));
       p6.powerOnInto("sample_import");
 
       // The volume genuinely is not there yet.
       expect(await manager.checkP6MassStorageMode()).toBeNull();
-      expect(manager.isP6UsbConnected()).toBe(true);
 
-      const result = await makeDetector().detectMode();
+      // Retries back off as 10ms, 20ms, 30ms… — the budget has to outlast the
+      // mount, which is why the real config waits seconds rather than millis.
+      const result = await makeDetector(5, 10).detectMode();
 
       expect(result.mode).toBe("sample_import");
-    });
-
-    it("settles on normal only after giving the volume time to appear", async () => {
-      p6.powerOnInto("normal");
-
-      const started = Date.now();
-      const result = await makeDetector(150).detectMode();
-
-      expect(result.mode).toBe("normal");
-      expect(Date.now() - started).toBeGreaterThanOrEqual(140);
     });
 
     it("returns as soon as the volume is already mounted", async () => {
       p6.powerOnInto("sample_import"); // mountDelayMs 0
 
       const started = Date.now();
-      const result = await makeDetector(5000).detectMode();
+      const result = await makeDetector().detectMode();
 
       expect(result.mode).toBe("sample_import");
       expect(Date.now() - started).toBeLessThan(500);
+    });
+
+    it("shares one in-flight detection between concurrent callers", async () => {
+      p6.powerOnInto("pattern_export");
+      const detector = makeDetector();
+
+      const [first, second] = await Promise.all([
+        detector.detectMode(),
+        detector.detectMode(),
+      ]);
+
+      expect(first).toBe(second);
     });
   });
 
@@ -144,24 +139,14 @@ describe("mode detection against a simulated P-6", () => {
       expect((await makeDetector().detectMode()).mode).toBe("pattern_import");
     });
 
-    it("sees the device leave the bus while powered off", async () => {
-      p6.powerOnInto("sample_import");
-      expect(manager.isP6UsbConnected()).toBe(true);
-
-      p6.powerOff();
-
-      expect(manager.isP6UsbConnected()).toBe(false);
-      expect((await makeDetector().detectMode()).mode).toBe("unknown");
-    });
-
-    it("reports normal after an eject leaves the device powered but unmounted", async () => {
+    it("reports unknown after an eject unmounts the volume", async () => {
       p6.powerOnInto("sample_import");
       expect((await makeDetector().detectMode()).mode).toBe("sample_import");
 
       p6.eject();
 
-      const result = await makeDetector(30).detectMode();
-      expect(result.mode).toBe("normal");
+      const result = await makeDetector(2).detectMode();
+      expect(result.mode).toBe("unknown");
       expect(await manager.checkP6MassStorageMode()).toBeNull();
     });
   });
@@ -191,6 +176,20 @@ describe("mode detection against a simulated P-6", () => {
       const info = await manager.checkP6MassStorageMode();
 
       expect(info).toMatchObject({ mode: "unknown" });
+    });
+
+    it("lists a mounted P-6 as a device", async () => {
+      p6.powerOnInto("pattern_export");
+
+      expect(await manager.scanForP6Devices()).toEqual([
+        { path: "/Volumes/P-6" },
+      ]);
+    });
+
+    it("lists nothing when the device is powered off", async () => {
+      p6.powerOff();
+
+      expect(await manager.scanForP6Devices()).toEqual([]);
     });
   });
 });

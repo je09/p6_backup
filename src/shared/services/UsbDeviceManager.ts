@@ -1,135 +1,43 @@
-import * as usb from "usb";
-import { Device } from "usb";
 import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 import { promises as fsPromises, readdirSync } from "fs";
 import * as path from "path";
+import { BACKUP_CONSTANTS } from "../constants";
+import { DEVICE_MODES } from "../constants/device";
+import { DeviceMode } from "../types/index";
 import { createComponentLogger } from "./Logger";
 
 const execFileAsync = promisify(execFileCb);
 
+/** A detected P-6, identified by the mount point of its mass storage volume. */
 export interface UsbDeviceInfo {
-  vendorId: number;
-  productId: number;
-  manufacturer?: string;
-  product?: string;
-  serialNumber?: string;
-  path?: string;
+  path: string;
 }
 
 export interface P6MassStorageInfo {
   path: string;
-  mode: string;
+  /** Read from the marker folder on the volume; `unknown` if there is none. */
+  mode: DeviceMode;
   banks?: string[];
   currentBank?: string;
 }
 
+const { BACKUP, RESTORE, EXPORT, IMPORT } = BACKUP_CONSTANTS.FOLDERS;
+const BANK_DIR_REGEX = /^BANK_([A-H])$/i;
+const PAD_DIR_REGEX = /^PAD_\d+$/i;
+
+/**
+ * Finds P-6 devices by their mounted volume. The P-6 only reaches the host in
+ * its export/import modes, where it mounts as a labelled volume, so the volume
+ * is both the detection signal and the data channel.
+ */
 export class UsbDeviceManager {
-  private static readonly ROLAND_VENDOR_ID = 0x0582;
-  private static readonly P6_PRODUCT_ID = 0x0300;
-  private static readonly P6_DEVICE_LABEL = "P6";
-  private deviceList: UsbDeviceInfo[] = [];
-  private onDeviceConnectedCallback?: (device: UsbDeviceInfo) => void;
-  private onDeviceDisconnectedCallback?: (device: UsbDeviceInfo) => void;
-  private isScanning = false;
   private logger = createComponentLogger("UsbDeviceManager");
 
-  constructor() {
-    try {
-      if (usb && typeof usb.getDeviceList === "function") {
-        this.logger.info("UsbDeviceManager initialized - using polling mode");
-      } else {
-        this.logger.warn("USB library not properly available");
-      }
-    } catch (error) {
-      this.logger.warn("Error testing USB library:", error);
-    }
-  }
-
-  async scanForP6Devices(
-    descriptorTimeoutMs: number = 2000
-  ): Promise<UsbDeviceInfo[]> {
-    if (this.isScanning) {
-      this.logger.debug("USB scan already in progress, skipping...");
-      return [...this.deviceList];
-    }
-    this.isScanning = true;
-    const devices: UsbDeviceInfo[] = [];
-    try {
-      if (!usb || typeof usb.getDeviceList !== "function") {
-        this.logger.warn("USB library not properly initialized");
-        return devices;
-      }
-      for (const device of usb.getDeviceList()) {
-        const descriptor = device.deviceDescriptor;
-        const deviceInfo: UsbDeviceInfo = {
-          vendorId: descriptor.idVendor,
-          productId: descriptor.idProduct,
-        };
-        if (deviceInfo.vendorId === UsbDeviceManager.ROLAND_VENDOR_ID) {
-          try {
-            device.open();
-            const readDescriptor = async (
-              idx: number,
-              key: "manufacturer" | "product" | "serialNumber"
-            ) => {
-              if (idx) {
-                try {
-                  (deviceInfo as any)[key] =
-                    await this.getStringDescriptorWithTimeout(
-                      device,
-                      idx,
-                      descriptorTimeoutMs
-                    );
-                } catch (err: any) {
-                  this.logger.warn(`Failed to read ${key}`, {
-                    error: err.message,
-                  });
-                }
-              }
-            };
-            await Promise.allSettled([
-              readDescriptor(descriptor.iManufacturer, "manufacturer"),
-              readDescriptor(descriptor.iProduct, "product"),
-              readDescriptor(descriptor.iSerialNumber, "serialNumber"),
-            ]);
-            await new Promise((r) => setTimeout(r, 100));
-            device.close();
-          } catch (error) {
-            this.logger.warn("Could not read device descriptors", { error });
-            try {
-              device.close();
-            } catch {}
-          }
-          devices.push(deviceInfo);
-        }
-      }
-      await this.scanMassStorageDevices(devices);
-    } catch (error) {
-      this.logger.error("Error scanning for P6 devices", { error });
-    } finally {
-      this.isScanning = false;
-    }
-    this.deviceList = devices;
-    return devices;
-  }
-
-  private async scanMassStorageDevices(
-    devices: UsbDeviceInfo[]
-  ): Promise<void> {
-    try {
-      for (const volumePath of await this.findP6VolumePaths()) {
-        devices.push({
-          vendorId: UsbDeviceManager.ROLAND_VENDOR_ID,
-          productId: UsbDeviceManager.P6_PRODUCT_ID,
-          manufacturer: "Roland",
-          product: "P6 (Mass Storage)",
-          path: volumePath,
-        });
-      }
-    } catch (error) {
-      this.logger.warn("Mass storage scan not available", { error });
-    }
+  /** Every mounted volume that looks like a P-6, as a device entry. */
+  async scanForP6Devices(): Promise<UsbDeviceInfo[]> {
+    const paths = await this.findP6VolumePaths();
+    return paths.map((volumePath) => ({ path: volumePath }));
   }
 
   /** Matches volume labels the P-6 presents, e.g. "P-6", "P6", "P6 SAMPLES". */
@@ -200,106 +108,63 @@ export class UsbDeviceManager {
       .map((drive) => drive.DeviceID!);
   }
 
-  private async getStringDescriptor(
-    device: Device,
-    index: number
-  ): Promise<string> {
-    return new Promise((resolve) => {
-      device.getStringDescriptor(index, (error: any, data?: string) => {
-        if (error) {
-          this.logger.warn(
-            `Descriptor read error for index ${index}: ${
-              error.message || error
-            }`
-          );
-          resolve("Unknown");
-        } else {
-          resolve(data || "Unknown");
-        }
-      });
-    });
-  }
-
-  isP6UsbConnected(): boolean {
-    try {
-      if (!usb || typeof usb.getDeviceList !== "function") return false;
-      return usb.getDeviceList().some(
-        (d) => d.deviceDescriptor.idVendor === UsbDeviceManager.ROLAND_VENDOR_ID
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private async getStringDescriptorWithTimeout(
-    device: Device,
-    index: number,
-    timeoutMs: number = 2000
-  ): Promise<string> {
-    return Promise.race([
-      this.getStringDescriptor(device, index),
-      new Promise<string>((resolve) =>
-        setTimeout(() => {
-          this.logger.warn(`Descriptor read timeout for index ${index}`);
-          resolve("Timeout");
-        }, timeoutMs)
-      ),
-    ]);
-  }
-
+  /** The mode of the first mounted P-6 volume, or null if none is mounted. */
   async checkP6MassStorageMode(): Promise<P6MassStorageInfo | null> {
-    try {
-      const possiblePaths = await this.getPossibleP6Paths();
-      this.logger.debug("Checking possible P6 paths:", possiblePaths);
-      for (const devicePath of possiblePaths) {
-        try {
-          const stat = await fsPromises.stat(devicePath);
-          if (stat.isDirectory()) {
-            const contents = await fsPromises.readdir(devicePath);
-            // A BACKUP folder means the device exports patterns to us; a
-            // RESTORE folder means it imports them from us.
-            if (contents.includes("BACKUP"))
-              return { path: devicePath, mode: "pattern_export" };
-            if (contents.includes("RESTORE"))
-              return { path: devicePath, mode: "pattern_import" };
-            if (contents.includes("EXPORT")) {
-              try {
-                const exportPath = path.join(devicePath, "EXPORT");
-                const exportContents = await fsPromises.readdir(exportPath);
-                const bankFolders = exportContents.filter((f: string) => /^BANK_[A-H]$/i.test(f));
-                const banks: string[] = [];
-                for (const folder of bankFolders) {
-                  try {
-                    const bankContents = await fsPromises.readdir(path.join(exportPath, folder));
-                    const hasPads = bankContents.some((f: string) => /^PAD_\d+$/i.test(f));
-                    if (hasPads) {
-                      const match = folder.match(/^BANK_([A-H])$/i);
-                      if (match?.[1]) banks.push(match[1].toUpperCase());
-                    }
-                  } catch {}
-                }
-                if (banks.length > 0)
-                  return {
-                    path: devicePath,
-                    mode: "sample_export",
-                    banks,
-                    currentBank: banks[0],
-                  };
-              } catch {
-                return { path: devicePath, mode: "sample_export" };
-              }
-              return { path: devicePath, mode: "sample_export" };
-            }
-            if (contents.includes("IMPORT"))
-              return { path: devicePath, mode: "sample_import" };
-            // A P6 volume with no marker folder tells us nothing about its
-            // mode. Never claim "normal" here — callers act on that.
-            return { path: devicePath, mode: "unknown" };
-          }
-        } catch {}
+    const markerModes: Array<[string, DeviceMode]> = [
+      [BACKUP, DEVICE_MODES.PATTERN_EXPORT],
+      [RESTORE, DEVICE_MODES.PATTERN_IMPORT],
+      [EXPORT, DEVICE_MODES.SAMPLE_EXPORT],
+      [IMPORT, DEVICE_MODES.SAMPLE_IMPORT],
+    ];
+
+    for (const devicePath of await this.getPossibleP6Paths()) {
+      let contents: string[];
+      try {
+        const stat = await fsPromises.stat(devicePath);
+        if (!stat.isDirectory()) continue;
+        contents = await fsPromises.readdir(devicePath);
+      } catch {
+        continue; // Volume vanished between listing and reading it.
       }
-    } catch {}
+
+      const marker = markerModes.find(([folder]) => contents.includes(folder));
+      // A P-6 volume with no marker folder tells us nothing about its mode.
+      // Never claim a specific mode here — callers act on it.
+      if (!marker) return { path: devicePath, mode: DEVICE_MODES.UNKNOWN };
+
+      const [, mode] = marker;
+      if (mode !== DEVICE_MODES.SAMPLE_EXPORT) return { path: devicePath, mode };
+
+      const banks = await this.readExportBanks(path.join(devicePath, EXPORT));
+      return banks.length > 0
+        ? { path: devicePath, mode, banks, currentBank: banks[0] }
+        : { path: devicePath, mode };
+    }
     return null;
+  }
+
+  /** Bank letters under EXPORT/ that actually hold pads. */
+  private async readExportBanks(exportPath: string): Promise<string[]> {
+    let entries: string[];
+    try {
+      entries = await fsPromises.readdir(exportPath);
+    } catch {
+      return [];
+    }
+
+    const banks: string[] = [];
+    for (const entry of entries) {
+      const match = BANK_DIR_REGEX.exec(entry);
+      if (!match) continue;
+      try {
+        const bankContents = await fsPromises.readdir(path.join(exportPath, entry));
+        if (bankContents.some((f) => PAD_DIR_REGEX.test(f)))
+          banks.push(match[1].toUpperCase());
+      } catch {
+        // Unreadable bank folder — treat as holding nothing.
+      }
+    }
+    return banks;
   }
 
   private async getPossibleP6Paths(): Promise<string[]> {
@@ -310,21 +175,5 @@ export class UsbDeviceManager {
       if (!paths.includes(discovered)) paths.push(discovered);
     }
     return paths;
-  }
-
-  onDeviceConnected(callback: (device: UsbDeviceInfo) => void): void {
-    this.onDeviceConnectedCallback = callback;
-  }
-  onDeviceDisconnected(callback: (device: UsbDeviceInfo) => void): void {
-    this.onDeviceDisconnectedCallback = callback;
-  }
-  getConnectedP6Devices(): UsbDeviceInfo[] {
-    return [...this.deviceList];
-  }
-  dispose(): void {
-    this.deviceList = [];
-    this.onDeviceConnectedCallback = undefined;
-    this.onDeviceDisconnectedCallback = undefined;
-    this.logger.info("UsbDeviceManager disposed");
   }
 }

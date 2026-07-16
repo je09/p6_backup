@@ -5,7 +5,6 @@ module.exports = {
   roots: ["<rootDir>/src"],
   testMatch: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
   moduleNameMapper: {
-    "^usb$": "<rootDir>/src/__tests__/__mocks__/usb.ts",
     "^electron$": "<rootDir>/src/__tests__/__mocks__/electron.ts",
   },
   transform: {

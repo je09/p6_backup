@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { DeviceStatus, RestoreResult } from "../../shared/types/index";
-
-export const MAX_SAMPLE_BATCH_BYTES = 10 * 1024 * 1024; // 10 MB hardware limit per session
+import { DeviceMode, DeviceStatus, RestoreResult } from "../../shared/types/index";
+import { BACKUP_CONSTANTS, DEVICE_MODES } from "../../shared/constants";
 
 /**
  * One device session's worth of work. A restore is an ordered list of these:
@@ -20,16 +19,15 @@ export interface RestoreSelection {
   bankSizes: Record<string, number>;
 }
 
-const ALL_BANKS = ["A", "B", "C", "D", "E", "F", "G", "H"];
-
 const MODE_OPERATION: Record<RestoreStage["kind"], string> = {
   samples: "sample restore",
   patterns: "pattern restore",
 };
 
 /**
- * Split bank IDs into sessions whose cumulative sample size stays within the
- * device limit. A bank that alone exceeds the limit occupies its own session.
+ * Split bank IDs into sessions whose cumulative sample size stays within what
+ * the device accepts. A bank that alone exceeds the limit occupies its own
+ * session — there is nothing else we can do with it.
  */
 export function buildBatchesBySize(
   banks: string[],
@@ -40,7 +38,10 @@ export function buildBatchesBySize(
   let currentSize = 0;
   for (const bank of banks) {
     const size = bankSizes[bank] ?? 0;
-    if (currentBatch.length > 0 && currentSize + size > MAX_SAMPLE_BATCH_BYTES) {
+    if (
+      currentBatch.length > 0 &&
+      currentSize + size > BACKUP_CONSTANTS.MAX_SESSION_BYTES
+    ) {
       batches.push(currentBatch);
       currentBatch = [];
       currentSize = 0;
@@ -65,7 +66,7 @@ export function buildRestorePlan(
     ? buildBatchesBySize(
         selection.selectedSampleBanks.length > 0
           ? selection.selectedSampleBanks
-          : ALL_BANKS,
+          : [...BACKUP_CONSTANTS.SAMPLE_BANKS],
         selection.bankSizes
       ).map((banks) => ({ kind: "samples", banks }))
     : [];
@@ -73,7 +74,7 @@ export function buildRestorePlan(
     ? [{ kind: "patterns", patternIds: selection.selectedPatterns }]
     : [];
 
-  return deviceMode === "pattern_import"
+  return deviceMode === DEVICE_MODES.PATTERN_IMPORT
     ? [...patternStages, ...sampleStages]
     : [...sampleStages, ...patternStages];
 }
@@ -93,8 +94,8 @@ function summarise(outcomes: StageOutcome[]): string {
 }
 
 export interface ModeSwitchDetails {
-  currentMode: string;
-  requiredMode: string;
+  currentMode: DeviceMode;
+  requiredMode: DeviceMode;
   operation: string;
   onContinue: () => void;
 }

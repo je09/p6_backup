@@ -29,14 +29,17 @@ export interface DeviceStatus {
   lastSeen: Date | null;
 }
 
+/**
+ * The P-6 only reaches the host as a mass storage volume, and only in the four
+ * modes below — each identified by the marker folder it exposes. Anything else
+ * (powered off, or powered on in normal mode, which mounts nothing) is
+ * indistinguishable from no device at all, and reads as `unknown`.
+ */
 export type DeviceMode =
-  | "pattern"
-  | "sample"
   | "pattern_export"
   | "pattern_import"
   | "sample_export"
   | "sample_import"
-  | "normal"
   | "unknown";
 export type ConnectionType = "usb";
 
@@ -114,6 +117,32 @@ export interface BackupInfo {
 }
 
 export type { PrmMetadata, SampleDependency } from "../utils/prmParser";
+
+/** A pattern offered for restore, as read out of a backup. */
+export interface BackupPatternItem {
+  id: string;
+  name: string;
+  bank: number;
+  pattern: number;
+  size: number;
+  metadata?: import("../utils/prmParser").PrmMetadata;
+}
+
+/** A sample file offered for restore, as read out of a backup. */
+export interface BackupSampleItem {
+  id: string;
+  name: string;
+  bank: string;
+  pad: number;
+  size: number;
+}
+
+/** What a backup holds, for the restore selection UI. */
+export interface BackupDetails {
+  patterns: BackupPatternItem[];
+  /** Keyed by upper-case bank letter. */
+  samples: Record<string, BackupSampleItem[]>;
+}
 
 /** A pattern file read from the device's BACKUP directory. */
 export interface PatternInfo {

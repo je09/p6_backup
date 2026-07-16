@@ -1,11 +1,5 @@
 import { DeviceMode, DeviceStatus, PatternInfo, SampleBankData } from "../types/index";
 
-// ── Focused sub-interfaces (ISP) ─────────────────────────────────────────────
-// Each service should depend only on the sub-interface it actually needs:
-//   ModeService        → IDeviceStatus & IDeviceModeOps
-//   BackupService      → IDeviceStatus & IDeviceIO
-//   PatternBackupService / SampleBackupService → IDeviceStatus & IDeviceIO
-
 export interface IDeviceStatus {
   isReady(): Promise<boolean>;
   getStatus(): DeviceStatus;
@@ -23,14 +17,18 @@ export interface IDeviceModeOps {
 }
 
 export interface IDeviceIO {
-  readData(dataType: string, parameters?: { bankId?: string }): Promise<PatternInfo[] | SampleBankData>;
-  writeData(dataType: string, data: PatternInfo[] | SampleBankData | string, parameters?: { bankId?: string; bankPath?: string }): Promise<boolean>;
+  readData(
+    dataType: string,
+    parameters?: { bankId?: string }
+  ): Promise<PatternInfo[] | SampleBankData>;
+  writeData(
+    dataType: string,
+    data: PatternInfo[] | SampleBankData,
+    parameters?: { bankId?: string }
+  ): Promise<boolean>;
 }
 
-// ── Composite interface (backwards-compatible) ────────────────────────────────
-// P6Device implements this. Existing code that types params as IDeviceConnection
-// continues to compile unchanged.
-
+/** What P6Device offers. Services depend on the narrower pieces above. */
 export interface IDeviceConnection
   extends IDeviceStatus,
     IDeviceEvents,
