@@ -46,7 +46,7 @@ function makeDevice(patterns: PatternInfo[] = ALL_PATTERNS): IDeviceConnection {
 function makeModeService(requirement: ModeRequirement | null = null): jest.Mocked<ModeService> {
   const svc = new ModeServiceMock({} as any) as jest.Mocked<ModeService>;
   svc.getOperationModeRequirement = jest.fn().mockReturnValue(requirement);
-  svc.waitForMode = jest.fn();
+
   return svc;
 }
 
@@ -113,7 +113,6 @@ describe("PatternBackupService.backupPatterns", () => {
 
 describe("PatternBackupService.restorePatterns", () => {
   let fss: jest.Mocked<FileSystemService>;
-  let fsMock: jest.Mocked<typeof import("fs/promises")>;
 
   const BACKUP_PATTERNS: PatternInfo[] = [
     { id: "1-1", bank: 1, pattern: 1, name: "P6_PTN1-1", path: "/backups/my-backup/patterns/P6_PTN1-1.RPM", size: 512 },
@@ -125,11 +124,11 @@ describe("PatternBackupService.restorePatterns", () => {
     fss = new (FileSystemService as any)() as jest.Mocked<FileSystemService>;
     fss.getDefaultBackupPath = jest.fn().mockResolvedValue("/backups");
     fss.copyFile = jest.fn().mockResolvedValue(undefined);
-    fsMock = jest.requireMock("fs/promises");
+    fss.writeJsonFile = jest.fn().mockResolvedValue(undefined);
+    fss.readJsonFile = jest.fn().mockImplementation(async (filePath: string) =>
+      filePath.endsWith("patterns.json") ? BACKUP_PATTERNS : null
+    );
     jest.clearAllMocks();
-    // patterns.json lives in the patterns/ subdir of the backup
-    (fsMock.access as jest.Mock).mockRejectedValue(new Error("not found")); // root not found
-    (fsMock.readFile as jest.Mock).mockResolvedValue(JSON.stringify(BACKUP_PATTERNS));
   });
 
   function makeRestoreDevice(): IDeviceConnection {

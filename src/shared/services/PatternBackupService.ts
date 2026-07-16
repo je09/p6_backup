@@ -5,9 +5,11 @@ import { parsePrmMetadata } from "../utils/prmParser";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
 import { IDeviceConnection } from "./interfaces";
+import { ERROR_MESSAGES } from "../constants";
 import { createComponentLogger } from "./Logger";
 import { ModeError } from "../errors/ModeError";
 import { BackupDirectoryService } from "./BackupDirectoryService";
+import { filesDir, readPatternsJson, writePatternsJson } from "./backupLayout";
 
 export class PatternBackupService {
   private logger = createComponentLogger("PatternBackupService");
@@ -21,24 +23,12 @@ export class PatternBackupService {
     this.backupDirService = new BackupDirectoryService(fileSystemService);
   }
 
-  async backupPatterns(customName?: string, patternIds?: string[]): Promise<BackupResult> {
+  async backupPatterns(
+    customName?: string,
+    patternIds?: string[]
+  ): Promise<BackupResult> {
     try {
-      let deviceStatus = this.device.getStatus();
-      if (!deviceStatus.connected) {
-        const isReady = await this.device.isReady();
-        if (!isReady) throw new Error("P6 device not connected");
-        deviceStatus = this.device.getStatus();
-      }
-
-      const modeRequirement =
-        this.modeService.getOperationModeRequirement("pattern backup");
-      if (modeRequirement) {
-        throw new ModeError(
-          modeRequirement.currentMode,
-          modeRequirement.requiredMode,
-          "pattern backup"
-        );
-      }
+      await this.requireDevice("pattern backup");
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backupDir = await this.backupDirService.createDirectory(
@@ -47,77 +37,58 @@ export class PatternBackupService {
         customName
       );
 
-      const allPatterns = await this.readPatternsFromDevice();
+      const allPatterns = (await this.device.readData(
+        "patterns"
+      )) as PatternInfo[];
       const patterns =
         patternIds && patternIds.length > 0
           ? allPatterns.filter((p) => patternIds.includes(p.id))
           : allPatterns;
 
-      const patternsDir = path.join(backupDir, "patterns");
-      await fs.mkdir(patternsDir, { recursive: true });
-
-      // Copy files first so we can record their backup locations in patterns.json
-      const patternsWithBackupPaths = await this.copyPatternFiles(patterns, patternsDir);
-      await fs.writeFile(
-        path.join(patternsDir, "patterns.json"),
-        JSON.stringify(patternsWithBackupPaths, null, 2)
-      );
+      // Copy first, so patterns.json records where the files ended up.
+      const copied = await this.copyPatternFiles(patterns, backupDir);
+      await writePatternsJson(this.fileSystemService, backupDir, copied);
 
       return {
         success: true,
         backupPath: backupDir,
         timestamp: new Date(),
-        itemCount: patternsWithBackupPaths.length,
-        message: `Successfully backed up ${patternsWithBackupPaths.length} patterns`,
+        itemCount: copied.length,
+        message: `Successfully backed up ${copied.length} patterns`,
       };
     } catch (error) {
+      this.logger.error("Pattern backup failed", { error });
       return {
         success: false,
         backupPath: "",
         timestamp: new Date(),
         itemCount: 0,
-        message: `Pattern backup failed: ${error instanceof Error ? error.message : error}`,
+        message: `Pattern backup failed: ${describe(error)}`,
       };
     }
   }
 
-  async restorePatterns(backupPath: string, patternIds?: string[]): Promise<RestoreResult> {
+  async restorePatterns(
+    backupPath: string,
+    patternIds?: string[]
+  ): Promise<RestoreResult> {
     try {
-      let deviceStatus = this.device.getStatus();
-      if (!deviceStatus.connected) {
-        const isReady = await this.device.isReady();
-        if (!isReady) throw new Error("P6 device not connected");
-        deviceStatus = this.device.getStatus();
-      }
+      await this.requireDevice("pattern restore");
 
-      const modeRequirement =
-        this.modeService.getOperationModeRequirement("pattern restore");
-      if (modeRequirement) {
-        throw new ModeError(
-          modeRequirement.currentMode,
-          modeRequirement.requiredMode,
-          "pattern restore"
-        );
-      }
+      const allPatterns = await readPatternsJson(
+        this.fileSystemService,
+        backupPath
+      );
+      if (!allPatterns) throw new Error("This backup contains no patterns.json");
 
-      // patterns.json stores the absolute path of each file within the backup directory.
-      // Try root-level first (backup), then patterns/ subdirectory.
-      let patternsJsonPath = path.join(backupPath, "patterns.json");
-      try {
-        await fs.access(patternsJsonPath);
-      } catch {
-        patternsJsonPath = path.join(backupPath, "patterns", "patterns.json");
-      }
-
-      const patternsData = await fs.readFile(patternsJsonPath, "utf-8");
-      const allPatterns: PatternInfo[] = JSON.parse(patternsData);
       const patterns =
         patternIds && patternIds.length > 0
           ? allPatterns.filter((p) => patternIds.includes(p.id))
           : allPatterns;
 
-      // p.path already points to the file's location in the backup directory.
-      await this.writePatternsToDevice(patterns);
+      // p.path already points at the file's location inside the backup.
+      const success = await this.device.writeData("patterns", patterns);
+      if (!success) throw new Error("Device rejected the patterns");
 
       return {
         success: true,
@@ -126,72 +97,61 @@ export class PatternBackupService {
         timestamp: new Date(),
       };
     } catch (error) {
+      this.logger.error("Pattern restore failed", { error });
       return {
         success: false,
         itemCount: 0,
-        message: `Pattern restore failed: ${error instanceof Error ? error.message : error}`,
+        message: `Pattern restore failed: ${describe(error)}`,
         timestamp: new Date(),
       };
     }
   }
 
-  private async readPatternsFromDevice(): Promise<PatternInfo[]> {
-    try {
-      const patterns = await this.device.readData("patterns");
-      return (patterns as PatternInfo[]) || [];
-    } catch (error) {
-      this.logger.error("Failed to read patterns from device", { error });
-      throw new Error(`Could not read patterns from device: ${error}`);
-    }
+  private async requireDevice(operation: string): Promise<void> {
+    if (!this.device.getStatus().connected && !(await this.device.isReady()))
+      throw new Error(ERROR_MESSAGES.DEVICE_NOT_CONNECTED);
+
+    const requirement = this.modeService.getOperationModeRequirement(operation);
+    if (requirement)
+      throw new ModeError(
+        requirement.currentMode,
+        requirement.requiredMode,
+        operation
+      );
   }
 
+  /** Copy each pattern into the backup's files/ tree, reading its metadata. */
   private async copyPatternFiles(
     patterns: PatternInfo[],
-    patternsDir: string
+    backupDir: string
   ): Promise<PatternInfo[]> {
-    const updated: PatternInfo[] = [];
+    const destDir = filesDir(backupDir);
+    const copied: PatternInfo[] = [];
     for (const pattern of patterns) {
-      if (pattern.path) {
-        const fileName = path.basename(pattern.path);
-        const destPath = path.join(patternsDir, fileName);
-        try {
-          await this.fileSystemService.copyFile(pattern.path, destPath);
-          const metadata = await this.readPrmMetadata(destPath);
-          updated.push({ ...pattern, path: destPath, metadata });
-        } catch (error) {
-          this.logger.warn(`Failed to copy pattern file ${pattern.name}`, { error });
-          updated.push(pattern);
-        }
-      } else {
-        updated.push(pattern);
-      }
+      if (!pattern.path) continue;
+      const destPath = path.join(destDir, path.basename(pattern.path));
+      await this.fileSystemService.copyFile(pattern.path, destPath);
+      copied.push({
+        ...pattern,
+        path: destPath,
+        metadata: await this.readPrmMetadata(destPath),
+      });
     }
-    return updated;
+    return copied;
   }
 
   private async readPrmMetadata(filePath: string) {
     try {
-      const content = await fs.readFile(filePath, "ascii");
-      return parsePrmMetadata(content);
-    } catch {
+      return parsePrmMetadata(await fs.readFile(filePath, "ascii"));
+    } catch (error) {
+      this.logger.warn(`Could not read PRM metadata from ${filePath}`, {
+        error,
+      });
       return undefined;
     }
   }
+}
 
-  private async writePatternsToDevice(patterns: PatternInfo[]): Promise<void> {
-    try {
-      const success = await this.device.writeData("patterns", patterns);
-      if (!success) throw new Error("Failed to write patterns to device");
-      this.logger.debug(
-        `Successfully wrote ${patterns.length} patterns to device`
-      );
-    } catch (error) {
-      this.logger.error(
-        "Failed to write patterns to device",
-        undefined,
-        error as Error
-      );
-      throw new Error(`Could not write patterns to device: ${error}`);
-    }
-  }
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

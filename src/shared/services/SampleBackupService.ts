@@ -1,13 +1,20 @@
-import * as fs from "fs/promises";
 import * as path from "path";
 import { BackupResult, RestoreResult, SampleBankData, SampleFileInfo } from "../types/index";
 import { FileSystemService } from "./FileSystemService";
 import { ModeService } from "./ModeService";
 import { IDeviceConnection } from "./interfaces";
 import { ERROR_MESSAGES, BACKUP_CONSTANTS } from "../constants";
+import { isSampleMode } from "../constants/device";
 import { createComponentLogger } from "./Logger";
 import { ModeError } from "../errors/ModeError";
 import { BackupDirectoryService } from "./BackupDirectoryService";
+import {
+  BankSamples,
+  countWavs,
+  readSamplesJson,
+  sampleBankDir,
+  writeSamplesJson,
+} from "./backupLayout";
 
 export class SampleBackupService {
   private logger = createComponentLogger("SampleBackupService");
@@ -27,111 +34,26 @@ export class SampleBackupService {
     padNumbers?: number[]
   ): Promise<BackupResult> {
     try {
-      let deviceStatus = this.device.getStatus();
-      if (!deviceStatus.connected) {
-        const isReady = await this.device.isReady();
-        if (!isReady) throw new Error("P6 device not connected");
-        deviceStatus = this.device.getStatus();
-      }
-
-      const modeRequirement =
-        this.modeService.getOperationModeRequirement("sample backup");
-      if (modeRequirement) {
-        throw new ModeError(
-          modeRequirement.currentMode,
-          modeRequirement.requiredMode,
-          "sample backup"
-        );
-      }
-
-      if (bankId) {
-        const currentMode = deviceStatus.mode;
-        const sampleModes = ["sample", "sample_export", "sample_import"];
-        if (sampleModes.includes(currentMode)) {
-          try {
-            const deviceCurrentBank = this.device.getCurrentBank();
-            const availableBanks = this.device.getCurrentBanks();
-
-            this.logger.debug(
-              `backupSamples: Target bank: ${bankId.toUpperCase()}, Device bank: ${deviceCurrentBank}, Available: ${availableBanks?.join(", ")}`
-            );
-
-            if (
-              deviceCurrentBank &&
-              deviceCurrentBank.toLowerCase() !== bankId.toLowerCase()
-            ) {
-              throw new Error(
-                ERROR_MESSAGES.BACKUP_WRONG_BANK(
-                  deviceCurrentBank,
-                  bankId
-                )
-              );
-            }
-
-            if (
-              availableBanks &&
-              !availableBanks.some(
-                (b) => b.toLowerCase() === bankId.toLowerCase()
-              )
-            ) {
-              throw new Error(
-                ERROR_MESSAGES.BACKUP_BANK_NOT_AVAILABLE(
-                  bankId,
-                  availableBanks
-                )
-              );
-            }
-          } catch (error: any) {
-            if (
-              error.message.includes("not available") ||
-              error.message.includes("currently set to bank")
-            ) {
-              throw error;
-            }
-            this.logger.warn("Could not verify bank selection", {
-              error: error.message,
-            });
-          }
-        }
-      }
+      await this.requireDevice("sample backup");
+      if (bankId) this.verifyBankSelected(bankId);
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const backupType = bankId ? `samples-bank-${bankId}` : "samples-all";
       const backupDir = await this.backupDirService.createDirectory(
-        backupType,
+        bankId ? `samples-bank-${bankId}` : "samples-all",
         timestamp,
         customName
       );
 
-      let samples: SampleBankData | Record<string, SampleFileInfo[]>;
-      let itemCount = 0;
+      const samples = bankId
+        ? { [bankId.toUpperCase()]: this.filterPads(
+            (await this.readBank(bankId)).samples,
+            padNumbers
+          ) }
+        : await this.readAllBanks();
 
-      if (bankId) {
-        samples = await this.readSamplesFromBank(bankId);
-        if (padNumbers && padNumbers.length > 0) {
-          samples.samples = samples.samples.filter((s) => {
-            const m = s.name.match(/^PAD_(\d+)\//i);
-            return m !== null && padNumbers.includes(parseInt(m[1], 10));
-          });
-        }
-        itemCount = samples.samples.filter((s) => s.name.toUpperCase().endsWith(".WAV")).length;
-      } else {
-        samples = await this.readAllSamples();
-        itemCount = Object.values(samples).reduce(
-          (total, bankSamples) => total + bankSamples.length,
-          0
-        );
-      }
-
-      await fs.writeFile(
-        path.join(backupDir, "samples.json"),
-        JSON.stringify(samples, null, 2)
-      );
-      const enrichedSamples = await this.copySampleFiles(samples, backupDir, bankId);
-      await fs.writeFile(
-        path.join(backupDir, "samples.json"),
-        JSON.stringify(enrichedSamples, null, 2)
-      );
+      const enriched = await this.copySampleFiles(samples, backupDir);
+      await writeSamplesJson(this.fileSystemService, backupDir, enriched);
+      const itemCount = countWavs(enriched);
 
       return {
         success: true,
@@ -149,7 +71,7 @@ export class SampleBackupService {
         backupPath: "",
         timestamp: new Date(),
         itemCount: 0,
-        message: `Sample backup failed: ${error instanceof Error ? error.message : error}`,
+        message: `Sample backup failed: ${describe(error)}`,
       };
     }
   }
@@ -160,189 +82,157 @@ export class SampleBackupService {
     sampleNames?: string[]
   ): Promise<RestoreResult> {
     try {
-      let deviceStatus = this.device.getStatus();
-      if (!deviceStatus.connected) {
-        const isReady = await this.device.isReady();
-        if (!isReady) throw new Error("P6 device not connected");
-        deviceStatus = this.device.getStatus();
-      }
-
-      const modeRequirement =
-        this.modeService.getOperationModeRequirement("sample restore");
-      if (modeRequirement) {
-        throw new ModeError(
-          modeRequirement.currentMode,
-          modeRequirement.requiredMode,
-          "sample restore"
-        );
-      }
-
-      const samplesData = await fs.readFile(
-        path.join(backupPath, "samples.json"),
-        "utf-8"
-      );
-      const parsed = JSON.parse(samplesData);
-
-      // Normalize: single-bank backups store SampleBankData ({ bankId, samples }),
-      // multi-bank backups store Record<bankId, SampleFileInfo[]>.
-      let samples: Record<string, SampleFileInfo[]>;
-      if ("bankId" in parsed && Array.isArray(parsed.samples)) {
-        samples = { [parsed.bankId]: parsed.samples };
-      } else {
-        samples = parsed;
-      }
-
-      let itemCount = 0;
-      let message = "";
+      await this.requireDevice("sample restore");
+      const samples = await readSamplesJson(this.fileSystemService, backupPath);
+      if (!samples) throw new Error("This backup contains no samples.json");
 
       const filterByNames = (list: SampleFileInfo[]) =>
         sampleNames && sampleNames.length > 0
           ? list.filter((s) => sampleNames.includes(s.name))
           : list;
 
+      let itemCount = 0;
+      let message: string;
+
       if (bankId) {
-        // Case-insensitive key lookup
         const bankKey = Object.keys(samples).find(
           (k) => k.toLowerCase() === bankId.toLowerCase()
         );
-        if (!bankKey) {
+        if (!bankKey)
           throw new Error(`Bank ${bankId.toUpperCase()} not found in backup`);
-        }
-        // s.path in samples.json already points to the file's location in the backup directory
-        const toRestore = filterByNames(samples[bankKey] as SampleFileInfo[]);
+        const toRestore = filterByNames(samples[bankKey]);
         await this.writeSamplesToBank(toRestore, bankId);
-        itemCount = toRestore.filter((s) => s.name.toUpperCase().endsWith(".WAV")).length;
+        itemCount = countWavs({ [bankKey]: toRestore });
         message = `Successfully restored bank ${bankId.toUpperCase()} (${itemCount} samples)`;
       } else {
         for (const [bank, bankSamples] of Object.entries(samples)) {
-          const toRestore = filterByNames(bankSamples as SampleFileInfo[]);
+          const toRestore = filterByNames(bankSamples);
           await this.writeSamplesToBank(toRestore, bank);
-          itemCount += toRestore.filter((s) => s.name.toUpperCase().endsWith(".WAV")).length;
+          itemCount += countWavs({ [bank]: toRestore });
         }
         message = `Successfully restored all sample banks (${itemCount} samples)`;
       }
 
-      return {
-        success: true,
-        itemCount,
-        message,
-        timestamp: new Date(),
-      };
+      return { success: true, itemCount, message, timestamp: new Date() };
     } catch (error) {
       return {
         success: false,
         itemCount: 0,
-        message: `Sample restore failed: ${error instanceof Error ? error.message : error}`,
+        message: `Sample restore failed: ${describe(error)}`,
         timestamp: new Date(),
       };
     }
   }
 
-  private async readSamplesFromBank(bankId: string): Promise<SampleBankData> {
-    try {
-      const result = await this.device.readData("samples", { bankId });
-      return (result as SampleBankData) || { bankId, samples: [] };
-    } catch (error) {
-      this.logger.error(`Failed to read samples from bank ${bankId}`, {
-        bankId,
-        error,
-      });
-      throw new Error(`Could not read samples from bank ${bankId}: ${error}`);
-    }
+  private async requireDevice(operation: string): Promise<void> {
+    if (!this.device.getStatus().connected && !(await this.device.isReady()))
+      throw new Error(ERROR_MESSAGES.DEVICE_NOT_CONNECTED);
+
+    const requirement = this.modeService.getOperationModeRequirement(operation);
+    if (requirement)
+      throw new ModeError(
+        requirement.currentMode,
+        requirement.requiredMode,
+        operation
+      );
   }
 
-  private async readAllSamples(): Promise<Record<string, SampleFileInfo[]>> {
+  /**
+   * The device exposes only the bank it is set to, so backing up a different
+   * one silently produces the wrong data. Refuse rather than guess.
+   */
+  private verifyBankSelected(bankId: string): void {
+    if (!isSampleMode(this.device.getCurrentMode())) return;
+
+    const deviceCurrentBank = this.device.getCurrentBank();
+    if (
+      deviceCurrentBank &&
+      deviceCurrentBank.toLowerCase() !== bankId.toLowerCase()
+    )
+      throw new Error(
+        ERROR_MESSAGES.BACKUP_WRONG_BANK(deviceCurrentBank, bankId)
+      );
+
+    const availableBanks = this.device.getCurrentBanks();
+    if (
+      availableBanks &&
+      !availableBanks.some((b) => b.toLowerCase() === bankId.toLowerCase())
+    )
+      throw new Error(
+        ERROR_MESSAGES.BACKUP_BANK_NOT_AVAILABLE(bankId, availableBanks)
+      );
+  }
+
+  private filterPads(
+    samples: SampleFileInfo[],
+    padNumbers?: number[]
+  ): SampleFileInfo[] {
+    if (!padNumbers || padNumbers.length === 0) return samples;
+    return samples.filter((s) => {
+      const match = /^PAD_(\d+)\//i.exec(s.name);
+      return match !== null && padNumbers.includes(parseInt(match[1], 10));
+    });
+  }
+
+  private async readBank(bankId: string): Promise<SampleBankData> {
+    const result = await this.device.readData("samples", { bankId });
+    return (result as SampleBankData) ?? { bankId, samples: [] };
+  }
+
+  private async readAllBanks(): Promise<BankSamples> {
     const banksToRead =
-      this.device.getCurrentBanks() ??
-      [...BACKUP_CONSTANTS.SAMPLE_BANKS];
-    const allSamples: Record<string, SampleFileInfo[]> = {};
+      this.device.getCurrentBanks() ?? [...BACKUP_CONSTANTS.SAMPLE_BANKS];
+    const allSamples: BankSamples = {};
     for (const bankId of banksToRead) {
       try {
-        const bankData = (await this.device.readData("samples", {
-          bankId,
-        })) as SampleBankData;
-        allSamples[bankId] = bankData.samples || [];
-      } catch {
-        // Bank doesn't exist on device, skip
+        allSamples[bankId.toUpperCase()] = (await this.readBank(bankId)).samples;
+      } catch (error) {
+        this.logger.debug(`Bank ${bankId} not present on device, skipping`, {
+          error,
+        });
       }
     }
     return allSamples;
   }
 
+  /**
+   * Copy every sample into the backup's files/ tree, recording the size each
+   * turned out to be. Sizes drive the batching of a later restore.
+   */
   private async copySampleFiles(
-    samples: SampleBankData | Record<string, SampleFileInfo[]>,
-    backupDir: string,
-    bankId?: string
-  ): Promise<SampleBankData | Record<string, SampleFileInfo[]>> {
-    const filesDir = path.join(backupDir, "files");
-    await fs.mkdir(filesDir, { recursive: true });
-
-    if ("bankId" in samples) {
-      const bank = bankId || (samples as SampleBankData).bankId;
-      const bankDir = path.join(filesDir, `BANK_${bank.toUpperCase()}`);
-      await fs.mkdir(bankDir, { recursive: true });
-      const enrichedSamples: SampleFileInfo[] = [];
-      for (const sample of samples.samples) {
-        const size = await this.copySingleSampleFile(sample, bankDir);
-        enrichedSamples.push(size !== undefined ? { ...sample, size } : sample);
-      }
-      return { ...(samples as SampleBankData), samples: enrichedSamples };
-    } else {
-      const enriched: Record<string, SampleFileInfo[]> = {};
-      for (const [bank, bankSamples] of Object.entries(samples as Record<string, SampleFileInfo[]>)) {
-        if (!Array.isArray(bankSamples)) continue;
-        const bankDir = path.join(filesDir, `BANK_${bank.toUpperCase()}`);
-        await fs.mkdir(bankDir, { recursive: true });
-        enriched[bank] = [];
-        for (const sample of bankSamples) {
-          const size = await this.copySingleSampleFile(sample, bankDir);
-          enriched[bank].push(size !== undefined ? { ...sample, size } : sample);
-        }
-      }
-      return enriched;
-    }
-  }
-
-  private async copySingleSampleFile(
-    sample: SampleFileInfo,
-    destDir: string
-  ): Promise<number | undefined> {
-    if (!sample?.path) return undefined;
-    const destPath = path.join(destDir, sample.name);
-    await fs.mkdir(path.dirname(destPath), { recursive: true });
-    try {
-      const stat = await fs.stat(sample.path);
-      if (stat.isFile()) {
+    samples: BankSamples,
+    backupDir: string
+  ): Promise<BankSamples> {
+    const enriched: BankSamples = {};
+    for (const [bank, bankSamples] of Object.entries(samples)) {
+      const bankDir = sampleBankDir(backupDir, bank);
+      enriched[bank] = [];
+      for (const sample of bankSamples) {
+        const destPath = path.join(bankDir, sample.name);
         await this.fileSystemService.copyFile(sample.path, destPath);
-        return stat.size;
+        const { size } = await this.fileSystemService.getFileStats(destPath);
+        enriched[bank].push({ ...sample, path: destPath, size });
       }
-    } catch (err) {
-      this.logger.warn(`Error copying sample file ${sample.name}`, { err });
     }
-    return undefined;
+    return enriched;
   }
 
   private async writeSamplesToBank(
     samples: SampleFileInfo[],
     bankId: string
   ): Promise<void> {
-    try {
-      const success = await this.device.writeData(
-        "samples",
-        { bankId, samples } satisfies SampleBankData,
-        { bankId }
-      );
-      if (!success)
-        throw new Error(`Failed to write samples to bank ${bankId}`);
-      this.logger.debug(
-        `Successfully wrote ${samples.length} samples to bank ${bankId.toUpperCase()}`
-      );
-    } catch (error) {
-      this.logger.error(`Failed to write samples to bank ${bankId}`, {
-        bankId,
-        error,
-      });
-      throw error instanceof Error ? error : new Error(`Could not write samples to bank ${bankId}`);
-    }
+    const success = await this.device.writeData(
+      "samples",
+      { bankId, samples } satisfies SampleBankData,
+      { bankId }
+    );
+    if (!success) throw new Error(`Failed to write samples to bank ${bankId}`);
+    this.logger.debug(
+      `Wrote ${samples.length} samples to bank ${bankId.toUpperCase()}`
+    );
   }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

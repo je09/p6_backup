@@ -1,37 +1,30 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { BackupInfo } from "../../shared/types/index";
-import { PrmMetadata, SampleDependency, SCALE_NAMES } from "../../shared/utils/prmParser";
+import {
+  BackupInfo,
+  BackupPatternItem,
+  BackupSampleItem,
+} from "../../shared/types/index";
+import { BACKUP_CONSTANTS } from "../../shared/constants";
+import { SampleDependency, SCALE_NAMES } from "../../shared/utils/prmParser";
 import { formatSize } from "../utils/formatters";
+import { buildBatchesBySize } from "../hooks/useRestoreOrchestration";
 
-const MAX_SESSION_BYTES = 10 * 1024 * 1024;
+const { MAX_SESSION_BYTES } = BACKUP_CONSTANTS;
 
-interface PatternItem {
-  id: string;
-  name: string;
-  bank: number;
-  pattern: number;
-  size: number;
-  selected: boolean;
-  metadata?: PrmMetadata;
-}
-
-interface SampleItem {
-  id: string;
-  name: string;
-  bank: string;
-  pad: number;
-  size: number;
-  selected: boolean;
-}
+type PatternItem = BackupPatternItem & { selected: boolean };
+type SampleItem = BackupSampleItem & { selected: boolean };
 
 interface BackupContentDetails {
-  patterns?: PatternItem[];
-  samples?: { [bankId: string]: SampleItem[] };
+  patterns: PatternItem[];
+  samples: { [bankId: string]: SampleItem[] };
   totalPatternSize: number;
   totalSampleSize: number;
   selectedPatternSize: number;
   selectedSampleSize: number;
 }
+
+const sumSizes = (items: { size: number }[]): number =>
+  items.reduce((sum, item) => sum + item.size, 0);
 
 interface RestoreSelectionModalProps {
   isOpen: boolean;
@@ -83,39 +76,28 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
     setSkipSamples(false);
     try {
       const details = await window.electronAPI.getBackupDetails(backup.path);
-      const processedDetails: BackupContentDetails = {
-        patterns: details.patterns?.map((p: any) => ({ ...p, selected: true })),
-        samples: {},
-        totalPatternSize: 0,
-        totalSampleSize: 0,
-        selectedPatternSize: 0,
-        selectedSampleSize: 0,
-      };
-      if (details.samples) {
-        Object.keys(details.samples).forEach((bankId) => {
-          processedDetails.samples![bankId] = details.samples![bankId].map(
-            (s: any) => ({ ...s, selected: true })
-          );
-        });
+      const patterns: PatternItem[] = details.patterns.map((p) => ({
+        ...p,
+        selected: true,
+      }));
+      const samples: Record<string, SampleItem[]> = {};
+      for (const [bankId, bankSamples] of Object.entries(details.samples)) {
+        samples[bankId] = bankSamples.map((s) => ({ ...s, selected: true }));
       }
-      if (processedDetails.patterns) {
-        processedDetails.totalPatternSize = processedDetails.patterns.reduce(
-          (sum, p) => sum + p.size, 0
-        );
-        processedDetails.selectedPatternSize = processedDetails.totalPatternSize;
-      }
-      if (processedDetails.samples) {
-        Object.values(processedDetails.samples).forEach((bank) => {
-          const s = bank.reduce((sum, s) => sum + s.size, 0);
-          processedDetails.totalSampleSize += s;
-          processedDetails.selectedSampleSize += s;
-        });
-      }
-      setBackupDetails(processedDetails);
-      setIncludePatterns(!!processedDetails.patterns?.length);
-      setIncludeSamples(!!Object.keys(processedDetails.samples || {}).length);
+
+      const totalPatternSize = sumSizes(patterns);
+      const totalSampleSize = sumSizes(Object.values(samples).flat());
+      setBackupDetails({
+        patterns,
+        samples,
+        totalPatternSize,
+        totalSampleSize,
+        selectedPatternSize: totalPatternSize,
+        selectedSampleSize: totalSampleSize,
+      });
+      setIncludePatterns(patterns.length > 0);
+      setIncludeSamples(Object.keys(samples).length > 0);
     } catch (error: any) {
-      console.error("Failed to load backup details:", error);
       setLoadError(error?.message || String(error));
     } finally {
       setIsLoading(false);
@@ -258,24 +240,22 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
     [activeSampleSize]
   );
 
-  /** Session groupings for the legacy (no-metadata) bank selector info box. */
+  /**
+   * Session groupings for the legacy (no-metadata) bank selector info box.
+   * Batched exactly as the restore itself will batch them.
+   */
   const legacySessionBatches = useMemo((): { banks: string[]; size: number }[] => {
-    if (!backupDetails?.samples) return [];
-    const batches: { banks: string[]; size: number }[] = [];
-    let cur: string[] = [];
-    let curSize = 0;
+    if (!backupDetails) return [];
+    const bankSizes: Record<string, number> = {};
     for (const [bankId, samples] of Object.entries(backupDetails.samples)) {
-      const bankSize = samples.filter((s) => s.selected).reduce((a, s) => a + s.size, 0);
-      if (cur.length > 0 && curSize + bankSize > MAX_SESSION_BYTES) {
-        batches.push({ banks: cur, size: curSize });
-        cur = [];
-        curSize = 0;
-      }
-      cur.push(bankId.toUpperCase());
-      curSize += bankSize;
+      bankSizes[bankId.toUpperCase()] = sumSizes(
+        samples.filter((s) => s.selected)
+      );
     }
-    if (cur.length > 0) batches.push({ banks: cur, size: curSize });
-    return batches;
+    return buildBatchesBySize(Object.keys(bankSizes), bankSizes).map((banks) => ({
+      banks,
+      size: banks.reduce((sum, bank) => sum + bankSizes[bank], 0),
+    }));
   }, [backupDetails]);
 
   // ── Selection summary (BPM/scale/length range) ─────────────────────────────
