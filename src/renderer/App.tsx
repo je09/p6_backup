@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   DeviceStatus,
   BackupResult,
@@ -24,6 +24,9 @@ const TABS: Array<{ key: View; label: string }> = [
   { key: "guide", label: UI_LABELS.NAV_GUIDE },
 ];
 
+/** Reachable mid-backup: the guide is what the user needs when they get stuck. */
+const ALWAYS_AVAILABLE: View[] = ["backup", "guide"];
+
 export const App: React.FC = () => {
   const logger = useMemo(() => createComponentLogger("App"), []);
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus>({
@@ -38,10 +41,23 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isBackupInProgress, setIsBackupInProgress] = useState(false);
 
+  // The menu listeners are registered once, so they read the flag from a ref
+  // rather than closing over a state value that goes stale.
+  const backupInProgress = useRef(false);
+  const canOpen = (view: View) =>
+    !backupInProgress.current || ALWAYS_AVAILABLE.includes(view);
+
+  const handleBackupInProgressChange = (inProgress: boolean) => {
+    backupInProgress.current = inProgress;
+    setIsBackupInProgress(inProgress);
+  };
+
   useEffect(() => {
     const onStatus = (status: DeviceStatus) => setDeviceStatus(status);
     const onBackup = () => setCurrentView("backup");
-    const onNavigate = (view: string) => setCurrentView(view as View);
+    const onNavigate = (view: string) => {
+      if (canOpen(view as View)) setCurrentView(view as View);
+    };
     window.electronAPI.onDeviceStatusChanged(onStatus);
     window.electronAPI.onMenuNewBackup(onBackup);
     window.electronAPI.onNavigate(onNavigate);
@@ -81,7 +97,7 @@ export const App: React.FC = () => {
       <BackupSection
         deviceStatus={deviceStatus}
         onBackupComplete={handleBackupComplete}
-        onBackupInProgressChange={setIsBackupInProgress}
+        onBackupInProgressChange={handleBackupInProgressChange}
       />
     ),
     restore: (
@@ -110,7 +126,8 @@ export const App: React.FC = () => {
         </div>
         <ul role="menu-bar">
           {TABS.map((tab) => {
-            const locked = isBackupInProgress && tab.key !== "backup";
+            const locked =
+              isBackupInProgress && !ALWAYS_AVAILABLE.includes(tab.key);
             return (
               <li
                 key={tab.key}

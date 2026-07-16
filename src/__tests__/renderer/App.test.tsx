@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { App } from "../../renderer/App";
 
 jest.mock("../../renderer/utils/logger", () => ({
@@ -14,7 +14,11 @@ jest.mock("../../renderer/utils/logger", () => ({
 // Each tab reports whether it is mounted and, for restore, exposes an input we
 // can type into to prove its state survives a tab switch.
 jest.mock("../../renderer/components/BackupSection", () => ({
-  BackupSection: () => <div data-testid="panel-backup" />,
+  BackupSection: ({ onBackupInProgressChange }: any) => (
+    <div data-testid="panel-backup">
+      <button onClick={() => onBackupInProgressChange(true)}>start-backup</button>
+    </div>
+  ),
 }));
 jest.mock("../../renderer/components/RestoreSection", () => ({
   RestoreSection: () => (
@@ -88,5 +92,68 @@ describe("App tabs", () => {
     expect((screen.getByLabelText("restore-scratch") as HTMLInputElement).value).toBe(
       "bank A queued"
     );
+  });
+});
+
+describe("App tabs during a backup", () => {
+  const startBackup = () => fireEvent.click(screen.getByText("start-backup"));
+
+  // The View menu's ⌘1–⌘4 accelerators arrive here, not through a tab click.
+  const navigateFromMenu = (view: string) => {
+    const handler = (window as any).electronAPI.onNavigate.mock.calls[0][0];
+    act(() => handler(view));
+  };
+
+  // A backup is exactly when the user needs the instructions for the mode the
+  // guide is asking them to switch into.
+  it("lets the user open the guide", async () => {
+    render(<App />);
+    startBackup();
+
+    fireEvent.click(screen.getByText("Guide"));
+
+    await waitFor(() => expect(visible("panel-guide")).toBe(true));
+  });
+
+  it("still locks the tabs that would interfere", async () => {
+    render(<App />);
+    startBackup();
+
+    fireEvent.click(screen.getByText("Restore"));
+    fireEvent.click(screen.getByText("Settings"));
+
+    expect(visible("panel-restore")).toBe(false);
+    expect(visible("panel-settings")).toBe(false);
+    expect(visible("panel-backup")).toBe(true);
+  });
+
+  it("ignores a menu shortcut to a locked tab", async () => {
+    render(<App />);
+    startBackup();
+
+    navigateFromMenu("settings");
+
+    expect(visible("panel-settings")).toBe(false);
+    expect(visible("panel-backup")).toBe(true);
+  });
+
+  it("opens the guide from a menu shortcut", async () => {
+    render(<App />);
+    startBackup();
+
+    navigateFromMenu("guide");
+
+    await waitFor(() => expect(visible("panel-guide")).toBe(true));
+  });
+
+  it("lets the user return to the backup from the guide", async () => {
+    render(<App />);
+    startBackup();
+
+    fireEvent.click(screen.getByText("Guide"));
+    await waitFor(() => expect(visible("panel-guide")).toBe(true));
+    fireEvent.click(screen.getByText("Backup"));
+
+    await waitFor(() => expect(visible("panel-backup")).toBe(true));
   });
 });
