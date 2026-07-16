@@ -22,6 +22,9 @@ import { IDeviceConnection } from "../services/interfaces";
 import * as usb from "usb";
 
 import * as fs from "fs";
+import { exec as execCb } from "child_process";
+import { promisify } from "util";
+const execAsync = promisify(execCb);
 
 export interface DeviceInfoResult {
   status: DeviceStatus;
@@ -280,6 +283,24 @@ export class P6Device implements IDeviceConnection {
   }
 
   async ejectDevice(): Promise<boolean> {
+    const mountPath = this.massStorageInfo?.path;
+    if (mountPath) {
+      let cmd = "";
+      if (process.platform === "darwin") {
+        cmd = `diskutil eject "${mountPath}"`;
+      } else if (process.platform === "linux") {
+        cmd = `umount "${mountPath}"`;
+      } else if (process.platform === "win32") {
+        cmd = `mountvol "${mountPath}" /D`;
+      }
+      if (cmd) {
+        try {
+          await execAsync(cmd);
+        } catch {
+          return false;
+        }
+      }
+    }
     this.status.connected = false;
     this.status.mode = DEVICE_MODES.UNKNOWN;
     this.currentDevice = null;

@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("fs:getBackupDetails", backupPath),
   renameBackup: (backupPath: string, newName: string) =>
     ipcRenderer.invoke("fs:renameBackup", backupPath, newName),
+  getBackupPath: () => ipcRenderer.invoke("fs:getBackupPath"),
+  setBackupPath: (newPath: string) => ipcRenderer.invoke("fs:setBackupPath", newPath),
 
   // Event Listeners
   onDeviceStatusChanged: (callback: (status: any) => void) => {

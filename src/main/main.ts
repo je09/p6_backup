@@ -341,6 +341,13 @@ class MainApplication {
         return backupPath;
       },
     );
+    ipcMain.handle("fs:getBackupPath", async () =>
+      this.fileSystemService.getDefaultBackupPath(),
+    );
+    ipcMain.handle("fs:setBackupPath", async (_, newPath: string) => {
+      await this.fileSystemService.setBackupPath(newPath);
+      await this.saveSettings({ backupPath: newPath });
+    });
     ipcMain.handle("log:write", async (_, logEntry: any) => {
       try {
         const { level, component, message, data, stack } = logEntry;
@@ -439,8 +446,44 @@ class MainApplication {
   private showUserGuide(): void {
     this.mainWindow?.webContents.send("navigation:show-guide");
   }
+  private settingsPath(): string {
+    return path.join(app.getPath("userData"), "settings.json");
+  }
+
+  private async loadSettings(): Promise<void> {
+    try {
+      const raw = await fs.promises.readFile(this.settingsPath(), "utf-8");
+      const settings = JSON.parse(raw);
+      if (settings.backupPath) {
+        try {
+          await this.fileSystemService.setBackupPath(settings.backupPath);
+        } catch {
+          // Invalid path — silently fall back to default
+        }
+      }
+    } catch {
+      // File missing or unreadable — use defaults
+    }
+  }
+
+  private async saveSettings(updates: Record<string, unknown>): Promise<void> {
+    const filePath = this.settingsPath();
+    let existing: Record<string, unknown> = {};
+    try {
+      const raw = await fs.promises.readFile(filePath, "utf-8");
+      existing = JSON.parse(raw);
+    } catch {
+      // Start fresh
+    }
+    await fs.promises.writeFile(
+      filePath,
+      JSON.stringify({ ...existing, ...updates }, null, 2),
+    );
+  }
+
   async initialize(): Promise<void> {
     await app.whenReady();
+    await this.loadSettings();
     this.registerGlobalShortcuts();
     await this.createWindow();
     app.on("activate", async () => {

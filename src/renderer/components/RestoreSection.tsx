@@ -59,14 +59,17 @@ const MAX_SAMPLE_BATCH_BYTES = 10 * 1024 * 1024; // 10 MB hardware limit per ses
  */
 function buildBatchesBySize(
   banks: string[],
-  bankSizes: Record<string, number>
+  bankSizes: Record<string, number>,
 ): string[][] {
   const batches: string[][] = [];
   let currentBatch: string[] = [];
   let currentSize = 0;
   for (const bank of banks) {
     const size = bankSizes[bank] ?? 0;
-    if (currentBatch.length > 0 && currentSize + size > MAX_SAMPLE_BATCH_BYTES) {
+    if (
+      currentBatch.length > 0 &&
+      currentSize + size > MAX_SAMPLE_BATCH_BYTES
+    ) {
       batches.push(currentBatch);
       currentBatch = [];
       currentSize = 0;
@@ -267,7 +270,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     const trimmed = renameValue.trim();
     if (!selectedBackup || !trimmed) return;
     if (/[/\\:*?"<>|]/.test(trimmed)) {
-      showSnackbar("Name contains invalid characters: / \\ : * ? \" < > |", "error");
+      showSnackbar(
+        'Name contains invalid characters: / \\ : * ? " < > |',
+        "error",
+      );
       return;
     }
     if (trimmed.length > 128) {
@@ -275,10 +281,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       return;
     }
     try {
-      await window.electronAPI.renameBackup(
-        selectedBackup.path,
-        trimmed,
-      );
+      await window.electronAPI.renameBackup(selectedBackup.path, trimmed);
       setShowRenameDialog(false);
       await loadAvailableBackups();
       setSelectedBackup(null);
@@ -391,7 +394,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
             selection.selectedSampleBanks.length > 0
               ? selection.selectedSampleBanks
               : ["A", "B", "C", "D", "E", "F", "G", "H"];
-          const chunks = buildBatchesBySize(banksToRestore, selection.bankSizes);
+          const chunks = buildBatchesBySize(
+            banksToRestore,
+            selection.bankSizes,
+          );
           const firstChunk = chunks[0];
           const chunkResults = [];
           for (const bankId of firstChunk) {
@@ -430,7 +436,8 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
             success: chunkResults.every((r) => r.success),
             message: chunkResults.every((r) => r.success)
               ? chunkResults.map((r) => r.message).join("\n")
-              : chunkResults.find((r) => !r.success)?.message ?? "Restore failed",
+              : (chunkResults.find((r) => !r.success)?.message ??
+                "Restore failed"),
             itemCount: chunkResults.reduce(
               (sum, r) => sum + (r.itemCount || 0),
               0,
@@ -484,7 +491,8 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
           success: chunkResults.every((r) => r.success),
           message: chunkResults.every((r) => r.success)
             ? chunkResults.map((r) => r.message).join("\n")
-            : chunkResults.find((r) => !r.success)?.message ?? "Restore failed",
+            : (chunkResults.find((r) => !r.success)?.message ??
+              "Restore failed"),
           itemCount: chunkResults.reduce(
             (sum, r) => sum + (r.itemCount || 0),
             0,
@@ -618,7 +626,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
         success: results.every((r) => r.success),
         message: results.every((r) => r.success)
           ? results.map((r) => r.message).join("\n")
-          : results.find((r) => !r.success)?.message ?? "Restore failed",
+          : (results.find((r) => !r.success)?.message ?? "Restore failed"),
         itemCount: results.reduce((sum, r) => sum + (r.itemCount || 0), 0),
         timestamp: new Date(),
       };
@@ -700,7 +708,9 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
         {isLoadingBackups ? (
           <p>Loading available backups…</p>
         ) : filteredAndSortedBackups.length === 0 ? (
-          <p style={{ fontStyle: "italic", fontSize: 13 }}>No backups found. Use the Backup tab to create your first backup.</p>
+          <p style={{ fontStyle: "italic", fontSize: 13 }}>
+            No backups found. Use the Backup tab to create your first backup.
+          </p>
         ) : (
           <div className="backup-list">
             {filteredAndSortedBackups.map((backup) => (
@@ -770,7 +780,14 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     <p style={{ marginBottom: 8 }}>{currentOperation}</p>
                     <div className="mac-progress mac-progress--indeterminate" />
                     {restoredLog.length > 0 && (
-                      <p style={{ fontSize: 12, opacity: 0.7, marginTop: 8, marginBottom: 0 }}>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          opacity: 0.7,
+                          marginTop: 8,
+                          marginBottom: 0,
+                        }}
+                      >
                         ✓ {restoredLog[restoredLog.length - 1]}
                       </p>
                     )}
@@ -791,8 +808,8 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                         <strong>Sample restore complete.</strong> Press{" "}
                         <strong>[KYBD]</strong> on the P-6 to save, then wait
                         for the unit to finish — it will show{" "}
-                        <strong>done</strong> on screen. Then power it off,
-                        hold <strong>[REC]</strong> and power back on to enter
+                        <strong>done</strong> on screen. Then power it off, hold{" "}
+                        <strong>[REC]</strong> and power back on to enter
                         Pattern Restore mode. Reconnect via USB.
                       </p>
                     </div>
@@ -835,11 +852,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       <p>
                         <strong>Step complete.</strong> Press{" "}
                         <strong>[KYBD]</strong> on the P-6 to save, then wait
-                        for the unit to finish — this can take up to 6 minutes.
-                        It will show <strong>done</strong> on screen. Then
-                        power it off, hold <strong>[SAMPLING]</strong> and
-                        power back on to enter Sample Restore mode. Reconnect
-                        via USB.
+                        for the unit to finish. It will show{" "}
+                        <strong>done</strong> on screen. Then power it off, hold{" "}
+                        <strong>[SAMPLING]</strong> and power back on to enter
+                        Sample Restore mode. Reconnect via USB.
                       </p>
                       <p>
                         Remaining banks to restore:{" "}
@@ -904,6 +920,21 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                         {line}
                       </p>
                     ))}
+                </div>
+                <div className="info-box" style={{ margin: "8px 0" }}>
+                  {restoredLog.some((entry) => entry.startsWith("Bank")) ? (
+                    <p>
+                      Press <strong>[KYBD]</strong> on the P-6 to save. Sample
+                      writing can take <strong>up to 6 minutes</strong> — wait
+                      for <strong>done</strong> to appear on screen before
+                      powering off.
+                    </p>
+                  ) : (
+                    <p>
+                      Press <strong>[KYBD]</strong> on the P-6 to save, then
+                      wait for <strong>done</strong> to appear on screen.
+                    </p>
+                  )}
                 </div>
                 <section
                   className="field-row"
@@ -1032,18 +1063,27 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       {/* Overwrite confirmation */}
       {pendingRestoreSelection && (
         <div className="mac-overlay">
-          <div className="modal-dialog outer-border" style={{ width: "28rem", maxWidth: "90vw" }}>
+          <div
+            className="modal-dialog outer-border"
+            style={{ width: "28rem", maxWidth: "90vw" }}
+          >
             <div className="inner-border">
               <div className="modal-contents">
                 <h1 className="modal-text">Confirm Restore</h1>
                 <p style={{ marginBottom: 10 }}>
                   This will overwrite existing data on your device
                   {pendingRestoreSelection.selectedSampleBanks.length > 0 &&
-                    ` (Banks: ${pendingRestoreSelection.selectedSampleBanks.map((b) => b.toUpperCase()).join(", ")})`}.
-                  This cannot be undone.
+                    ` (Banks: ${pendingRestoreSelection.selectedSampleBanks.map((b) => b.toUpperCase()).join(", ")})`}
+                  . This cannot be undone.
                 </p>
-                <section className="field-row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-                  <button className="btn" onClick={() => setPendingRestoreSelection(null)}>
+                <section
+                  className="field-row"
+                  style={{ justifyContent: "flex-end", gap: 8, marginTop: 12 }}
+                >
+                  <button
+                    className="btn"
+                    onClick={() => setPendingRestoreSelection(null)}
+                  >
                     Cancel
                   </button>
                   <button
@@ -1062,7 +1102,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
           </div>
         </div>
       )}
-
     </div>
   );
 };

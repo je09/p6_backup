@@ -11,12 +11,14 @@ export interface BackupState {
   selectedPatterns: string[];
   setSelectedPatterns: (patterns: string[]) => void;
   detectedDependencies: SampleDependency[];
+  isLoadingPatterns: boolean;
 }
 
 export function useBackupState(deviceStatus: DeviceStatus): BackupState {
   const [availableBanks, setAvailableBanks] = useState<string[]>([]);
   const [availablePatterns, setAvailablePatterns] = useState<PatternInfo[]>([]);
   const [selectedPatterns, setSelectedPatterns] = useState<string[]>([]);
+  const [isLoadingPatterns, setIsLoadingPatterns] = useState(false);
 
   useEffect(() => {
     const fetchAvailableBanks = async () => {
@@ -52,6 +54,7 @@ export function useBackupState(deviceStatus: DeviceStatus): BackupState {
           deviceStatus.mode === "pattern_export" ||
           deviceStatus.mode === "pattern_import")
       ) {
+        setIsLoadingPatterns(true);
         try {
           const patterns = await window.electronAPI.getCurrentPatterns();
           if (patterns && Array.isArray(patterns)) {
@@ -64,10 +67,13 @@ export function useBackupState(deviceStatus: DeviceStatus): BackupState {
           log.error("Failed to fetch available patterns", { error });
           setAvailablePatterns([]);
           setSelectedPatterns([]);
+        } finally {
+          setIsLoadingPatterns(false);
         }
       } else {
         setAvailablePatterns([]);
         setSelectedPatterns([]);
+        setIsLoadingPatterns(false);
       }
     };
     fetchAvailablePatterns();
@@ -103,5 +109,6 @@ export function useBackupState(deviceStatus: DeviceStatus): BackupState {
     selectedPatterns,
     setSelectedPatterns,
     detectedDependencies,
+    isLoadingPatterns,
   };
 }

@@ -41,6 +41,7 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     selectedPatterns,
     setSelectedPatterns,
     detectedDependencies,
+    isLoadingPatterns,
   } = useBackupState(deviceStatus);
 
   const canBackupPatterns = ["pattern", "pattern_export", "pattern_import"].includes(
@@ -351,6 +352,7 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
             setSelectedPatterns={setSelectedPatterns}
             canBackupPatterns={canBackupPatterns}
             isBackupInProgress={isBackingUp}
+            isLoadingPatterns={isLoadingPatterns}
             detectedDependencies={detectedDependencies}
             deviceStatus={deviceStatus}
           />

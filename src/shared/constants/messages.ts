@@ -426,6 +426,7 @@ export const UI_LABELS = {
   NAV_RESTORE: "Restore",
   NAV_PRESETS: "Presets",
   NAV_GUIDE: "Guide",
+  NAV_SETTINGS: "Settings",
 
   // Guide section titles
   GUIDE_PATTERN_BACKUP: "Pattern Backup",

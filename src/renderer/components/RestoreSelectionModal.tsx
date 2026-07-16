@@ -84,7 +84,7 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
     try {
       const details = await window.electronAPI.getBackupDetails(backup.path);
       const processedDetails: BackupContentDetails = {
-        patterns: details.patterns?.map((p: any) => ({ ...p, selected: false })),
+        patterns: details.patterns?.map((p: any) => ({ ...p, selected: true })),
         samples: {},
         totalPatternSize: 0,
         totalSampleSize: 0,
@@ -102,7 +102,7 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
         processedDetails.totalPatternSize = processedDetails.patterns.reduce(
           (sum, p) => sum + p.size, 0
         );
-        processedDetails.selectedPatternSize = 0;
+        processedDetails.selectedPatternSize = processedDetails.totalPatternSize;
       }
       if (processedDetails.samples) {
         Object.values(processedDetails.samples).forEach((bank) => {
@@ -574,7 +574,7 @@ export const RestoreSelectionModal: React.FC<RestoreSelectionModalProps> = ({
                                 onChange={() => toggleBank(bankId)}
                               />
                               <label htmlFor={`rb-${bankId}`}>
-                                <strong>Bank {bankId.toUpperCase()} ({samples.length} samples)</strong>
+                                <strong>Bank {bankId.toUpperCase()} ({new Set(samples.map(s => s.pad)).size} samples)</strong>
                               </label>
                             </div>
                           </div>

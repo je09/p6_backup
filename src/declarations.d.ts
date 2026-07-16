@@ -81,6 +81,8 @@ declare global {
       discoverBackups(): Promise<BackupInfo[]>;
       getBackupDetails(backupPath: string): Promise<BackupDetails>;
       renameBackup(backupPath: string, newName: string): Promise<string>;
+      getBackupPath(): Promise<string>;
+      setBackupPath(newPath: string): Promise<void>;
       onDeviceStatusChanged(callback: (status: DeviceStatus) => void): void;
       onMenuAction(action: string, callback: () => void): void;
       onNavigationRequest(callback: (route: string) => void): void;

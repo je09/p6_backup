@@ -8,16 +8,18 @@ import { DeviceStatusCard } from "./components/DeviceStatusCard";
 import { BackupSection } from "./components/BackupSection";
 import { RestoreSection } from "./components/RestoreSection";
 import { UserGuide } from "./components/UserGuide";
+import { SettingsSection } from "./components/SettingsSection";
 import { createComponentLogger } from "./utils/logger";
 import { UI_LABELS } from "../shared/constants";
 import { SnackbarProvider } from "./context/SnackbarContext";
 
-type View = "backup" | "restore" | "guide";
+type View = "backup" | "restore" | "guide" | "settings";
 
 const TABS: Array<{ key: View; label: string }> = [
   { key: "backup", label: UI_LABELS.NAV_BACKUP },
   { key: "restore", label: UI_LABELS.NAV_RESTORE },
   { key: "guide", label: UI_LABELS.NAV_GUIDE },
+  { key: "settings", label: UI_LABELS.NAV_SETTINGS },
 ];
 
 export const App: React.FC = () => {
@@ -86,6 +88,8 @@ export const App: React.FC = () => {
         );
       case "guide":
         return <UserGuide />;
+      case "settings":
+        return <SettingsSection />;
       default:
         return null;
     }

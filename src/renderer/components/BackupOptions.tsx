@@ -9,6 +9,7 @@ interface BackupOptionsProps {
   setSelectedPatterns: (v: string[]) => void;
   canBackupPatterns: boolean;
   isBackupInProgress: boolean;
+  isLoadingPatterns: boolean;
   detectedDependencies: SampleDependency[];
   deviceStatus: { connected: boolean };
 }
@@ -28,6 +29,7 @@ export const BackupOptions: React.FC<BackupOptionsProps> = ({
   setSelectedPatterns,
   canBackupPatterns,
   isBackupInProgress,
+  isLoadingPatterns,
   detectedDependencies,
   deviceStatus,
 }) => {
@@ -48,10 +50,15 @@ export const BackupOptions: React.FC<BackupOptionsProps> = ({
           Device must be in Pattern Mode to load patterns.
         </p>
       )}
+      {canBackupPatterns && isLoadingPatterns && (
+        <p style={{ fontSize: 11, fontStyle: "italic", margin: "0 0 6px" }}>
+          Loading patterns…
+        </p>
+      )}
       <PatternSelector
         selectedPatterns={selectedPatterns}
         onPatternSelectionChange={handlePatternSelectionChange}
-        disabled={!canBackupPatterns || isBackupInProgress}
+        disabled={!canBackupPatterns || isBackupInProgress || isLoadingPatterns}
         availablePatterns={availablePatterns}
       />
 
