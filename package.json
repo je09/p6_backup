@@ -16,6 +16,7 @@
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",
     "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "jest",
     "clean": "rimraf dist .webpack"
   },

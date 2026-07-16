@@ -56,7 +56,8 @@ describe("P6Device", () => {
     modeDetector.detectMode.mockResolvedValue(makeDetectionResult("pattern_export"));
     modeDetector.detectModeQuick.mockResolvedValue(makeDetectionResult("pattern_export"));
     modeDetector.getConfig.mockReturnValue({
-      maxAttempts: 5, baseDelayMs: 1000, timeoutMs: 30000, enableAutoRetry: true, logLevel: "info",
+      maxAttempts: 5, baseDelayMs: 1000, timeoutMs: 30000, enableAutoRetry: true,
+      mountSettleMs: 4000, logLevel: "info",
     });
     modeDetector.getModeInstructions.mockReturnValue([]);
 

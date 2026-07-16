@@ -9,6 +9,7 @@
   "include": [
     "src/shared/**/*",
     "src/renderer/**/*",
-    "src/__tests__/**/*"
+    "src/__tests__/**/*",
+    "src/declarations.d.ts"
   ]
 }
