@@ -93,12 +93,9 @@ export const BackupSection: React.FC<BackupSectionProps> = ({
     log,
   });
 
-  useEffect(() => {
-    window.electronAPI.onFileCopySuccess((data: { message: string }) =>
-      showSnackbar(data.message, "info")
-    );
-    return () => window.electronAPI.removeAllListeners("file-copy-success");
-  }, [showSnackbar]);
+  // File copy notifications are handled once at the app level: both this and
+  // RestoreSection are mounted together, and each removing all listeners on the
+  // shared channel would have deafened the other.
 
   const checkDeviceReadiness = useCallback(async () => {
     if (!deviceStatus.connected) {

@@ -99,24 +99,9 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     continueRestore,
   } = useRestoreOrchestration({ deviceStatus, onRestoreComplete });
 
-  // File copy success event listener
+  // File copy notifications are handled once at the app level; see FileCopyNotifier.
   useEffect(() => {
-    const handleFileCopySuccess = (data: {
-      fileName: string;
-      message: string;
-    }) => {
-      showSnackbar(data.message, "info");
-    };
-
-    window.electronAPI.onFileCopySuccess(handleFileCopySuccess);
-
-    // Load available backups on component mount
     loadAvailableBackups();
-
-    // Cleanup listener on component unmount
-    return () => {
-      window.electronAPI.removeAllListeners("file-copy-success");
-    };
   }, []);
 
   // Load available backups

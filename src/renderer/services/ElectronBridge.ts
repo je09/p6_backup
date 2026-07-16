@@ -40,7 +40,7 @@ export class ElectronBridge implements IElectronBridge {
   // Events
   onDeviceStatusChanged(callback: Parameters<IElectronBridge["onDeviceStatusChanged"]>[0]) { return this.api.onDeviceStatusChanged(callback); }
   onMenuNewBackup(callback: () => void) { return this.api.onMenuNewBackup(callback); }
-  onNavigationShowGuide(callback: () => void) { return this.api.onNavigationShowGuide(callback); }
+  onNavigate(callback: (view: string) => void) { return this.api.onNavigate(callback); }
   onFileCopySuccess(callback: Parameters<IElectronBridge["onFileCopySuccess"]>[0]) { return this.api.onFileCopySuccess(callback); }
   removeAllListeners(channel: string) { return this.api.removeAllListeners(channel); }
 

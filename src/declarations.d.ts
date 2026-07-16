@@ -85,9 +85,8 @@ declare global {
       setBackupPath(newPath: string): Promise<void>;
       onDeviceStatusChanged(callback: (status: DeviceStatus) => void): void;
       onMenuAction(action: string, callback: () => void): void;
-      onNavigationRequest(callback: (route: string) => void): void;
+      onNavigate(callback: (view: string) => void): void;
       onMenuNewBackup(callback: () => void): void;
-      onNavigationShowGuide(callback: () => void): void;
       onFileCopySuccess(callback: (data: { fileName: string; message: string }) => void): void;
       removeAllListeners(channel: string): void;
       windowClose(): Promise<void>;

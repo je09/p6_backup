@@ -80,7 +80,7 @@ export interface IFileBridge {
 export interface IEventBridge {
   onDeviceStatusChanged(callback: (status: DeviceStatus) => void): void;
   onMenuNewBackup(callback: () => void): void;
-  onNavigationShowGuide(callback: () => void): void;
+  onNavigate(callback: (view: string) => void): void;
   onFileCopySuccess(callback: (data: { fileName: string; message: string }) => void): void;
   removeAllListeners(channel: string): void;
 }

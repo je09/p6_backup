@@ -63,17 +63,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(`menu:${action}`, callback);
   },
 
-  onNavigationRequest: (callback: (route: string) => void) => {
-    ipcRenderer.on("navigation:show-guide", (_, route) => callback(route));
+  onNavigate: (callback: (view: string) => void) => {
+    ipcRenderer.on("menu:navigate", (_, view) => callback(view));
   },
 
   // Menu-specific event handlers
   onMenuNewBackup: (callback: () => void) => {
     ipcRenderer.on("menu:new-backup", callback);
-  },
-
-  onNavigationShowGuide: (callback: () => void) => {
-    ipcRenderer.on("navigation:show-guide", callback);
   },
 
   // File copy success event listener

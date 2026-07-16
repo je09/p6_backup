@@ -107,9 +107,54 @@ class MainApplication {
     return !app.isPackaged;
   }
 
+  private navigate(view: string): void {
+    this.mainWindow?.webContents.send("menu:navigate", view);
+  }
+
   private setupMenu(): void {
     const isDebugging = this.isDebugMode();
+    const isMac = process.platform === "darwin";
+
+    // Tab order must match the renderer's, since these are its accelerators.
+    const viewMenu = {
+      label: "View",
+      submenu: [
+        { label: "Backup", accelerator: "CmdOrCtrl+1", click: () => this.navigate("backup") },
+        { label: "Restore", accelerator: "CmdOrCtrl+2", click: () => this.navigate("restore") },
+        { label: "Settings", accelerator: "CmdOrCtrl+3", click: () => this.navigate("settings") },
+        { label: "Guide", accelerator: "CmdOrCtrl+4", click: () => this.navigate("guide") },
+      ],
+    };
+
+    const settingsItem = {
+      label: "Settings…",
+      accelerator: "CmdOrCtrl+,",
+      click: () => this.navigate("settings"),
+    };
+
     const template = [
+      // On macOS the first menu is always the application menu, whatever its
+      // label. Without this entry, File's contents were being shown there.
+      ...(isMac
+        ? [
+            {
+              label: app.name,
+              submenu: [
+                { role: "about", label: `About ${app.name}` },
+                { type: "separator" },
+                settingsItem,
+                { type: "separator" },
+                { role: "services" },
+                { type: "separator" },
+                { role: "hide" },
+                { role: "hideOthers" },
+                { role: "unhide" },
+                { type: "separator" },
+                { role: "quit" },
+              ],
+            },
+          ]
+        : []),
       {
         label: "File",
         submenu: [
@@ -123,10 +168,14 @@ class MainApplication {
             accelerator: "CmdOrCtrl+O",
             click: () => this.openBackupFolder(),
           },
-          { type: "separator" },
-          { role: "quit" },
+          ...(isMac
+            ? []
+            : [{ type: "separator" }, settingsItem, { type: "separator" }, { role: "quit" }]),
         ],
       },
+      // Without this, the clipboard shortcuts do nothing in any text field.
+      { role: "editMenu" },
+      viewMenu,
       {
         label: "Device",
         submenu: [
@@ -152,14 +201,16 @@ class MainApplication {
                   accelerator: "F12",
                   click: () => this.toggleDevTools(),
                 },
+                // Reload sits on F5, not CmdOrCtrl+R: that belongs to Refresh
+                // Device Status above, and two items cannot share it.
                 {
                   label: "Reload",
-                  accelerator: "CmdOrCtrl+R",
+                  accelerator: "F5",
                   click: () => this.mainWindow?.webContents.reload(),
                 },
                 {
                   label: "Force Reload",
-                  accelerator: "CmdOrCtrl+Shift+R",
+                  accelerator: "Shift+F5",
                   click: () =>
                     this.mainWindow?.webContents.reloadIgnoringCache(),
                 },
@@ -167,11 +218,12 @@ class MainApplication {
             },
           ]
         : []),
+      { role: "windowMenu" },
       {
-        label: "Help",
+        role: "help",
         submenu: [
-          { label: "About", click: () => this.showAbout() },
-          { label: "User Guide", click: () => this.showUserGuide() },
+          { label: "User Guide", accelerator: "CmdOrCtrl+?", click: () => this.navigate("guide") },
+          ...(isMac ? [] : [{ type: "separator" }, { label: "About", click: () => this.showAbout() }]),
         ],
       },
     ];
@@ -417,17 +469,30 @@ class MainApplication {
       this.p6Device.getStatus(),
     );
   }
+  /**
+   * macOS shows its own About panel via the { role: "about" } menu item, so it
+   * only needs the contents. Elsewhere there is no such panel and the Help menu
+   * opens a dialog instead.
+   */
+  private setupAboutPanel(): void {
+    app.setAboutPanelOptions({
+      applicationName: "P-6 Backup Tool",
+      applicationVersion: app.getVersion(),
+      copyright: `© ${new Date().getFullYear()} je09 · MIT License`,
+      credits: "Backup and restore for Roland P-6 patterns and samples.",
+      iconPath: path.join(__dirname, "../assets/icon.png"),
+    });
+  }
+
   private showAbout(): void {
     dialog.showMessageBox(this.mainWindow!, {
       type: "info",
-      title: "About Roland P6 Backup Tool",
-      message: `Roland P6 Backup Tool v${app.getVersion()}`,
+      title: "About P-6 Backup Tool",
+      message: `P-6 Backup Tool ${app.getVersion()}`,
       detail:
-        "A comprehensive backup and restore solution for Roland P6 patterns and samples.",
+        "Backup and restore for Roland P-6 patterns and samples.\n" +
+        `© ${new Date().getFullYear()} je09 · MIT License`,
     });
-  }
-  private showUserGuide(): void {
-    this.mainWindow?.webContents.send("navigation:show-guide");
   }
   // The renderer supplies backup paths, so any path it hands back must be
   // confirmed to sit under the configured backup root before we write to it.
@@ -484,6 +549,7 @@ class MainApplication {
 
   async initialize(): Promise<void> {
     await app.whenReady();
+    this.setupAboutPanel();
     await this.loadSettings();
     this.registerGlobalShortcuts();
     await this.createWindow();
