@@ -17,15 +17,22 @@ export interface ModeDetectionConfig {
   baseDelayMs: number;
   timeoutMs: number;
   enableAutoRetry: boolean;
+  /** How long a mass storage volume gets to mount after USB enumeration. */
+  mountSettleMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
 export class ModeDetector {
+  // How often to look for the volume while waiting out mountSettleMs. The OS
+  // normally mounts within a second or two.
+  private static readonly MOUNT_POLL_DIVISOR = 10;
+
   private static readonly DEFAULT_CONFIG: ModeDetectionConfig = {
     maxAttempts: 5,
     baseDelayMs: 1000,
     timeoutMs: 30000,
     enableAutoRetry: true,
+    mountSettleMs: 4000,
     logLevel: "info",
   };
   private static readonly logLevels = { debug: 0, info: 1, warn: 2, error: 3 };
@@ -64,9 +71,14 @@ export class ModeDetector {
       const massStorageInfo = await this.usbManager.checkP6MassStorageMode();
       if (!massStorageInfo) {
         if (this.usbManager.isP6UsbConnected()) {
+          // The device is on the bus but no volume is mounted. That usually
+          // means normal mode, but the OS also enumerates USB a second or two
+          // before it mounts a mass storage volume, so a device on its way
+          // into an export/import mode looks identical right now. Low
+          // confidence keeps the retry loop running until the volume settles.
           return {
             mode: DEVICE_MODES.NORMAL,
-            confidence: "high",
+            confidence: "low",
             massStorageInfo: null,
             detectionMethod: "direct",
             timestamp: new Date(),
@@ -186,7 +198,35 @@ export class ModeDetector {
     )
       return quickResult;
     if (!this.config.enableAutoRetry) return quickResult;
+    if (quickResult.mode === DEVICE_MODES.NORMAL)
+      return this.awaitVolumeOrConfirmNormal(quickResult);
     return this.performRetryDetection();
+  }
+
+  /**
+   * Called when the device is on the bus but no volume is mounted. Waits out
+   * the gap between USB enumeration and the volume appearing, so a device
+   * powering into an export/import mode is not mistaken for normal mode. If no
+   * volume shows up within the settle window, it really is normal mode.
+   */
+  private async awaitVolumeOrConfirmNormal(
+    normalResult: ModeDetectionResult
+  ): Promise<ModeDetectionResult> {
+    const pollMs = Math.max(
+      1,
+      Math.floor(this.config.mountSettleMs / ModeDetector.MOUNT_POLL_DIVISOR)
+    );
+    const deadline = Date.now() + this.config.mountSettleMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      const result = await this.detectModeQuick();
+      if (
+        result.mode !== DEVICE_MODES.NORMAL &&
+        result.mode !== DEVICE_MODES.UNKNOWN
+      )
+        return result;
+    }
+    return { ...normalResult, confidence: "high" };
   }
 
   private async performRetryDetection(): Promise<ModeDetectionResult> {

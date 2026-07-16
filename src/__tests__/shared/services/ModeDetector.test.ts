@@ -107,4 +107,46 @@ describe("ModeDetector", () => {
       expect(instructions.length).toBeGreaterThan(0);
     });
   });
+
+  // The OS enumerates the USB device a second or two before it mounts the
+  // volume. Concluding "normal mode" in that gap latched the wrong mode for as
+  // long as the device stayed connected.
+  describe("detectMode — volume mounted after USB enumeration", () => {
+    beforeEach(() => {
+      detector = new ModeDetector(usbManager, {
+        enableAutoRetry: true,
+        maxAttempts: 5,
+        baseDelayMs: 1,
+        mountSettleMs: 20,
+        logLevel: "error",
+      });
+    });
+
+    it("waits for the volume instead of reporting normal mode", async () => {
+      usbManager.isP6UsbConnected.mockReturnValue(true);
+      usbManager.checkP6MassStorageMode
+        .mockResolvedValueOnce(null) // USB up, volume still mounting
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({ path: "/Volumes/P-6", mode: "sample_import" });
+
+      const result = await detector.detectMode();
+      expect(result.mode).toBe("sample_import");
+    });
+
+    it("reports normal mode when no volume ever appears", async () => {
+      usbManager.isP6UsbConnected.mockReturnValue(true);
+      usbManager.checkP6MassStorageMode.mockResolvedValue(null);
+
+      const result = await detector.detectMode();
+      expect(result.mode).toBe("normal");
+    });
+
+    it("does not report normal mode when the device is off the bus", async () => {
+      usbManager.isP6UsbConnected.mockReturnValue(false);
+      usbManager.checkP6MassStorageMode.mockResolvedValue(null);
+
+      const result = await detector.detectMode();
+      expect(result.mode).toBe("unknown");
+    });
+  });
 });
