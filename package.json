@@ -68,7 +68,7 @@
   },
   "build": {
     "appId": "com.je09.p6backup",
-    "productName": "P6 BackupTool",
+    "productName": "P-6 Backup Tool",
     "directories": {
       "output": "release"
     },

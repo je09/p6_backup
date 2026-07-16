@@ -15,7 +15,7 @@ import { BackupDiscoveryService } from "../shared/services/BackupDiscoveryServic
 import { ModeService } from "../shared/services/ModeService";
 import { P6Device } from "../shared/models/P6Device";
 import { logger, LogLevel } from "../shared/services/Logger";
-import { IPC, IPC_EVENTS } from "../shared/constants";
+import { IPC, IPC_EVENTS, UI_LABELS } from "../shared/constants";
 import { manifestPath } from "../shared/services/backupLayout";
 
 interface Settings {
@@ -134,9 +134,9 @@ class MainApplication {
       ...(isMac
         ? [
             {
-              label: app.name,
+              label: UI_LABELS.APP_TITLE,
               submenu: [
-                { role: "about", label: `About ${app.name}` },
+                { role: "about", label: `About ${UI_LABELS.APP_TITLE}` },
                 { type: "separator" },
                 settingsItem,
                 { type: "separator" },
