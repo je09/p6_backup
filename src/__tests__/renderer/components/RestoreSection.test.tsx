@@ -293,6 +293,97 @@ describe("RestoreSection — mode check before pending pattern restore", () => {
   });
 });
 
+// ─── pattern-only restore ─────────────────────────────────────────────────────
+
+/**
+ * Restoring patterns alone is a single stage: one device session, no banks and
+ * no power cycle. It must not drag any sample handling along with it.
+ */
+describe("RestoreSection — pattern-only restore", () => {
+  const PATTERNS_ONLY = {
+    includePatterns: true,
+    includeSamples: false,
+    selectedPatterns: [] as string[],
+    selectedSampleBanks: [] as string[],
+    selectedSamples: {} as Record<string, string[]>,
+    bankSizes: {} as Record<string, number>,
+  };
+
+  it("restores patterns and never touches samples", async () => {
+    mockSelection = { ...PATTERNS_ONLY };
+    const restorePatterns = jest.fn().mockResolvedValue({
+      success: true, message: "patterns ok", itemCount: 3, type: "backup", timestamp: new Date(),
+    });
+    const restoreSamples = jest.fn();
+
+    await openAndConfirmRestore("pattern_import", { restorePatterns, restoreSamples });
+
+    await waitFor(() => expect(restorePatterns).toHaveBeenCalledTimes(1));
+    expect(restorePatterns).toHaveBeenCalledWith("/backups/backup-2024-01", undefined);
+    expect(restoreSamples).not.toHaveBeenCalled();
+  });
+
+  it("finishes in one session, with no continue step", async () => {
+    mockSelection = { ...PATTERNS_ONLY };
+
+    await openAndConfirmRestore("pattern_import", {});
+
+    await waitFor(() =>
+      expect(screen.queryByText("Restore Complete")).not.toBeNull()
+    );
+    expect(screen.queryByText("Step Complete — More Banks to Restore")).toBeNull();
+    expect(screen.queryByText("Step Complete — Pattern Restore Next")).toBeNull();
+  });
+
+  it("passes only the patterns the user picked", async () => {
+    mockSelection = { ...PATTERNS_ONLY, selectedPatterns: ["1-1", "2-3"] };
+    const restorePatterns = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    await openAndConfirmRestore("pattern_import", { restorePatterns });
+
+    await waitFor(() =>
+      expect(restorePatterns).toHaveBeenCalledWith("/backups/backup-2024-01", ["1-1", "2-3"])
+    );
+  });
+
+  it("asks for a mode switch instead of restoring in the wrong mode", async () => {
+    mockSelection = { ...PATTERNS_ONLY };
+    const restorePatterns = jest.fn();
+
+    await openAndConfirmRestore("sample_import", {
+      restorePatterns,
+      checkModeRequirement: jest.fn().mockResolvedValue({
+        currentMode: "sample_import",
+        requiredMode: "pattern_import",
+      }),
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("mode-switch-modal")).not.toBeNull()
+    );
+    expect(restorePatterns).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed pattern restore", async () => {
+    mockSelection = { ...PATTERNS_ONLY };
+
+    await openAndConfirmRestore("pattern_import", {
+      restorePatterns: jest.fn().mockResolvedValue({
+        success: false, message: "device is write protected", itemCount: 0,
+        type: "backup", timestamp: new Date(),
+      }),
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText("Restore Failed")).not.toBeNull()
+    );
+    expect(screen.queryByText("device is write protected")).not.toBeNull();
+    expect(screen.queryByText("Restore Complete")).toBeNull();
+  });
+});
+
 // ─── multi-batch sample restore ───────────────────────────────────────────────
 
 const MB = 1024 * 1024;

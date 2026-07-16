@@ -40,6 +40,23 @@ export interface FakeP6Options {
   label?: string;
   /** Banks and their pads, exposed in sample_export mode. */
   banks?: Record<string, number[]>;
+  /** Bytes the device accepts per import session before refusing more. */
+  sessionByteLimit?: number;
+}
+
+/** Which mode each operation demands, mirroring the device's own rules. */
+const REQUIRED_MODE: Record<string, P6Mode> = {
+  "pattern backup": "pattern_export",
+  "pattern restore": "pattern_import",
+  "sample backup": "sample_export",
+  "sample restore": "sample_import",
+};
+
+/** A backup on disk that can be restored onto the device. */
+export interface FakeBackup {
+  patternIds: string[];
+  /** Sample bytes and count per bank. */
+  samples: Record<string, { bytes: number; count: number }>;
 }
 
 export class FakeP6 {
@@ -51,11 +68,25 @@ export class FakeP6 {
   mountDelayMs: number;
   label: string;
   banks: Record<string, number[]>;
+  sessionByteLimit: number;
+
+  /** Bytes written in the current power-on session; a power cycle clears it. */
+  private sessionBytes = 0;
+  /** Everything written to the device, across all sessions. */
+  readonly imported: { patterns: string[]; banks: string[] } = {
+    patterns: [],
+    banks: [],
+  };
 
   constructor(options: FakeP6Options = {}) {
     this.mountDelayMs = options.mountDelayMs ?? 0;
     this.label = options.label ?? "P-6";
     this.banks = options.banks ?? { A: [1, 2], B: [1] };
+    this.sessionByteLimit = options.sessionByteLimit ?? 10 * 1024 * 1024;
+  }
+
+  get bytesUsedThisSession(): number {
+    return this.sessionBytes;
   }
 
   get volumePath(): string {
@@ -68,6 +99,8 @@ export class FakeP6 {
     this.mode = mode;
     this.ejected = false;
     this.mountedAt = mode === "normal" ? null : Date.now() + this.mountDelayMs;
+    // A fresh power-on is a fresh import session.
+    this.sessionBytes = 0;
     return this;
   }
 
@@ -76,6 +109,64 @@ export class FakeP6 {
     this.mountedAt = null;
     this.ejected = false;
     return this;
+  }
+
+  currentMode(): P6Mode {
+    return this.poweredOn ? this.mode : "normal";
+  }
+
+  /**
+   * What the device would say about an operation: null when it is already in
+   * the right mode, otherwise what it needs instead.
+   */
+  modeRequirement(
+    operation: string
+  ): { operation: string; requiredMode: P6Mode; currentMode: P6Mode } | null {
+    const requiredMode = REQUIRED_MODE[operation];
+    if (!requiredMode) return null;
+    const currentMode = this.currentMode();
+    return currentMode === requiredMode
+      ? null
+      : { operation, requiredMode, currentMode };
+  }
+
+  /**
+   * Write one bank of samples. The device refuses if it is not in sample
+   * import mode, or if this would push the session past what it accepts —
+   * the constraint that forces a restore to be split across power cycles.
+   */
+  importSamples(backup: FakeBackup, bankId: string): { itemCount: number } {
+    if (this.currentMode() !== "sample_import")
+      throw new Error(
+        `Device is in ${this.currentMode()} mode, not sample import`
+      );
+    if (!this.isVolumeMounted()) throw new Error("No volume mounted");
+
+    const bank = backup.samples[bankId.toUpperCase()];
+    if (!bank) throw new Error(`Bank ${bankId} is not in this backup`);
+
+    if (this.sessionBytes + bank.bytes > this.sessionByteLimit)
+      throw new Error(
+        `Import session limit exceeded: ${this.sessionBytes + bank.bytes} bytes ` +
+          `exceeds ${this.sessionByteLimit}. Power cycle to start a new session.`
+      );
+
+    this.sessionBytes += bank.bytes;
+    this.imported.banks.push(bankId.toUpperCase());
+    return { itemCount: bank.count };
+  }
+
+  /** Write patterns. The device refuses unless it is in pattern import mode. */
+  importPatterns(backup: FakeBackup, patternIds?: string[]): { itemCount: number } {
+    if (this.currentMode() !== "pattern_import")
+      throw new Error(
+        `Device is in ${this.currentMode()} mode, not pattern import`
+      );
+    if (!this.isVolumeMounted()) throw new Error("No volume mounted");
+
+    const ids = patternIds?.length ? patternIds : backup.patternIds;
+    this.imported.patterns.push(...ids);
+    return { itemCount: ids.length };
   }
 
   /** Power cycle into a new mode, as the user does between restore stages. */
