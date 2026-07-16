@@ -89,6 +89,18 @@ ul[role="menu-bar"] li[role="menu-item"].nav-active {
   color: #fff;
 }
 
+// system.css inverts a menu-bar item while it holds focus, which a click leaves
+// behind. Only the active tab may look selected.
+ul[role="menu-bar"] > li[role="menu-item"]:not(.nav-active):focus,
+ul[role="menu-bar"] > li[role="menu-item"]:not(.nav-active):focus-within {
+  background: transparent;
+  color: inherit;
+}
+ul[role="menu-bar"] > li[role="menu-item"]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
 // Locked nav item (backup in progress)
 ul[role="menu-bar"] li[role="menu-item"].nav-locked {
   opacity: 0.4;
