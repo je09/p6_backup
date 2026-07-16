@@ -51,13 +51,16 @@ const BackupListItem: React.FC<{
   </div>
 );
 
-const MAX_SAMPLE_BATCH_BYTES = 10 * 1024 * 1024; // 10 MB hardware limit per session
+export const MAX_SAMPLE_BATCH_BYTES = 10 * 1024 * 1024; // 10 MB hardware limit per session
 
 /**
  * Split a list of bank IDs into sessions where cumulative selected sample size ≤ 10 MB.
  * A bank that alone exceeds the limit occupies its own session.
+ *
+ * Exported for tests: this encodes a hardware constraint whose edges (a single
+ * oversized bank, an exact-limit fit) are worth pinning down directly.
  */
-function buildBatchesBySize(
+export function buildBatchesBySize(
   banks: string[],
   bankSizes: Record<string, number>,
 ): string[][] {

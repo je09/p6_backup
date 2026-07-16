@@ -278,3 +278,326 @@ describe("handleCancel", () => {
     expect(result.current.currentBankIndex).toBe(0);
   });
 });
+
+// ─── multi-stage progression ─────────────────────────────────────────────────
+
+const API = () => (window as any).electronAPI;
+
+/**
+ * Props whose callbacks survive a rerender, the way App passes them. Rebuilding
+ * them per rerender would hand each stage a fresh spy to report through.
+ */
+function makeStableProps() {
+  const showSnackbar = jest.fn();
+  const onBackupComplete = jest.fn();
+  const log = {
+    info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn(),
+  } as any;
+  const build = (deviceStatus = makeStatus()) => ({
+    deviceStatus,
+    onBackupComplete,
+    showSnackbar,
+    log,
+  });
+  return { build, showSnackbar, onBackupComplete };
+}
+
+/** Drive the guide from the patterns stage through every queued bank. */
+async function runFullBackup(banks: string[]) {
+  const props = makeStableProps();
+  const { result, rerender } = renderHook(
+    (p: ReturnType<typeof props.build>) => useBackupOrchestration(p),
+    { initialProps: props.build(makeStatus("pattern_export")) }
+  );
+
+  act(() => {
+    result.current.startBackup(banks, "patterns", "my-backup");
+  });
+  await act(async () => {
+    await result.current.handleContinue();
+  });
+
+  rerender(props.build(makeStatus("sample_export")));
+  for (let i = 0; i < banks.length; i++) {
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+  }
+  return { result, props };
+}
+
+describe("multi-stage backup — patterns then every bank in turn", () => {
+  it("backs up each bank once, in queue order", async () => {
+    const { result } = await runFullBackup(["a", "b", "c"]);
+
+    const banksBackedUp = API().backupSamples.mock.calls.map(
+      (c: any[]) => c[0]
+    );
+    expect(banksBackedUp).toEqual(["a", "b", "c"]);
+    expect(API().backupPatterns).toHaveBeenCalledTimes(1);
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+
+  it("organizes once at the end with every stage result", async () => {
+    await runFullBackup(["a", "b", "c"]);
+
+    expect(API().organizeBackup).toHaveBeenCalledTimes(1);
+    const options = API().organizeBackup.mock.calls[0][0];
+    expect(options).toMatchObject({
+      includePatterns: true,
+      includeSamples: true,
+      bankIds: ["a", "b", "c"],
+      customName: "my-backup",
+    });
+    expect(options.precompletedResults).toHaveLength(4); // patterns + 3 banks
+  });
+
+  it("ejects between every stage so the user can switch banks", async () => {
+    await runFullBackup(["a", "b"]);
+
+    // one eject per stage (patterns, bank a, bank b) plus one on completion
+    expect(API().ejectDevice).toHaveBeenCalledTimes(4);
+  });
+
+  it("completes without a samples stage when no banks are queued", async () => {
+    const { result } = renderHook(() =>
+      useBackupOrchestration(makeProps(makeStatus("pattern_export")))
+    );
+
+    act(() => {
+      result.current.startBackup([], "patterns");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(API().backupSamples).not.toHaveBeenCalled();
+    expect(API().organizeBackup).toHaveBeenCalledWith(
+      expect.objectContaining({ includePatterns: true, includeSamples: false })
+    );
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+
+  it("passes the selected patterns and per-bank pads through to the device", async () => {
+    const props = makeProps(makeStatus("pattern_export"));
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof makeProps>) => useBackupOrchestration(p),
+      { initialProps: props }
+    );
+
+    act(() => {
+      result.current.startBackup(["a"], "patterns", undefined, ["1-1", "1-2"], {
+        A: [1, 3],
+      });
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+    rerender(makeProps(makeStatus("sample_export")));
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(API().backupPatterns).toHaveBeenCalledWith(undefined, ["1-1", "1-2"]);
+    expect(API().backupSamples).toHaveBeenCalledWith("a", undefined, [1, 3]);
+  });
+});
+
+describe("multi-stage backup — a failing stage stops the run", () => {
+  it("aborts and reports when the pattern stage fails", async () => {
+    const props = makeProps(makeStatus("pattern_export"));
+    API().backupPatterns.mockResolvedValue({
+      ...BASE_BACKUP_RESULT,
+      success: false,
+      message: "device busy",
+    });
+    const { result } = renderHook(() => useBackupOrchestration(props));
+
+    act(() => {
+      result.current.startBackup(["a"], "patterns");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      expect.stringContaining("device busy"),
+      "error"
+    );
+    expect(API().backupSamples).not.toHaveBeenCalled();
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+
+  it("aborts and reports when a bank fails, without organizing", async () => {
+    API().backupSamples.mockResolvedValue({
+      ...BASE_BACKUP_RESULT,
+      success: false,
+      message: "bank read error",
+    });
+    const props = makeProps(makeStatus("pattern_export"));
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof makeProps>) => useBackupOrchestration(p),
+      { initialProps: props }
+    );
+
+    act(() => {
+      result.current.startBackup(["a", "b"], "patterns");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+    rerender(makeProps(makeStatus("sample_export")));
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(API().organizeBackup).not.toHaveBeenCalled();
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+
+  it("reports when the device disconnects mid-run", async () => {
+    const props = makeProps(makeStatus("pattern_export"));
+    const { result, rerender } = renderHook(
+      (p: ReturnType<typeof makeProps>) => useBackupOrchestration(p),
+      { initialProps: props }
+    );
+
+    act(() => {
+      result.current.startBackup(["a"], "patterns");
+    });
+
+    const disconnected = makeProps({ ...makeStatus("pattern_export"), connected: false });
+    rerender(disconnected);
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(disconnected.showSnackbar).toHaveBeenCalledWith(
+      "Device disconnected",
+      "error"
+    );
+    expect(API().backupPatterns).not.toHaveBeenCalled();
+  });
+});
+
+describe("multi-stage backup — bank verification before writing", () => {
+  it("refuses to back up when the device is on a different bank", async () => {
+    API().getCurrentBank.mockResolvedValue("c");
+    const props = makeProps(makeStatus("sample_export"));
+    const { result } = renderHook(() => useBackupOrchestration(props));
+
+    act(() => {
+      result.current.startBackup(["a"], "samples");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      expect.stringContaining("Wrong bank"),
+      "error"
+    );
+    expect(API().backupSamples).not.toHaveBeenCalled();
+  });
+
+  it("refuses to back up a bank the device does not report", async () => {
+    API().getCurrentBanks.mockResolvedValue(["b", "c"]);
+    const props = makeProps(makeStatus("sample_export"));
+    const { result } = renderHook(() => useBackupOrchestration(props));
+
+    act(() => {
+      result.current.startBackup(["a"], "samples");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      expect.stringContaining("not available"),
+      "error"
+    );
+    expect(API().backupSamples).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the bank cannot be verified at all", async () => {
+    API().getCurrentBank.mockRejectedValue(new Error("descriptor timeout"));
+    const props = makeProps(makeStatus("sample_export"));
+    const { result } = renderHook(() => useBackupOrchestration(props));
+
+    act(() => {
+      result.current.startBackup(["a"], "samples");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(API().backupSamples).toHaveBeenCalledWith("a", undefined, undefined);
+  });
+
+  it("matches the selected bank case-insensitively", async () => {
+    API().getCurrentBank.mockResolvedValue("A");
+    API().getCurrentBanks.mockResolvedValue(["A", "B"]);
+    const props = makeProps(makeStatus("sample_export"));
+    const { result } = renderHook(() => useBackupOrchestration(props));
+
+    act(() => {
+      result.current.startBackup(["a"], "samples");
+    });
+    await act(async () => {
+      await result.current.handleContinue();
+    });
+
+    expect(API().backupSamples).toHaveBeenCalledWith("a", undefined, undefined);
+    expect(props.showSnackbar).not.toHaveBeenCalledWith(
+      expect.stringContaining("Wrong bank"),
+      "error"
+    );
+  });
+});
+
+describe("multi-stage backup — eject and organize failures", () => {
+  it("keeps going and warns when the device will not eject", async () => {
+    API().ejectDevice.mockResolvedValue(false);
+    const { result, props } = await runFullBackup(["a"]);
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      "Device eject failed",
+      "warning"
+    );
+    expect(API().organizeBackup).toHaveBeenCalledTimes(1);
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+
+  it("keeps going and warns when ejecting throws", async () => {
+    API().ejectDevice.mockRejectedValue(new Error("diskutil busy"));
+    const { props } = await runFullBackup(["a"]);
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      "Device eject failed",
+      "warning"
+    );
+    expect(API().organizeBackup).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unsuccessful organize", async () => {
+    API().organizeBackup.mockResolvedValue({
+      ...BASE_BACKUP_RESULT,
+      success: false,
+      message: "no space left",
+    });
+    const { props } = await runFullBackup(["a"]);
+
+    expect(props.showSnackbar).toHaveBeenCalledWith("no space left", "error");
+  });
+
+  it("reports a thrown organize and hides the guide", async () => {
+    API().organizeBackup.mockRejectedValue(new Error("manifest write failed"));
+    const { result, props } = await runFullBackup(["a"]);
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      "manifest write failed",
+      "error"
+    );
+    expect(result.current.showBackupGuide).toBe(false);
+  });
+});

@@ -28,6 +28,9 @@ jest.mock("../../../shared/services/Logger", () => ({
 
 // Import AFTER mocking to get the mock constructors
 import { DeviceConnectionService } from "../../../shared/services/DeviceConnectionService";
+import { execFile } from "child_process";
+
+const execFileMock = execFile as unknown as jest.Mock;
 const ConnSvcMock = DeviceConnectionService as jest.MockedClass<typeof DeviceConnectionService>;
 const UsbMock = UsbDeviceManager as jest.MockedClass<typeof UsbDeviceManager>;
 const DetectorMock = ModeDetector as jest.MockedClass<typeof ModeDetector>;
@@ -177,6 +180,78 @@ describe("P6Device", () => {
 
       expect(device.getStatus().connected).toBe(false);
       expect(device.getCurrentMode()).toBe("unknown");
+    });
+
+    it("unmounts the volume through the OS", async () => {
+      const device = makeDevice();
+      await onConnectedCb!(ROLAND_DEVICE);
+
+      const ok = await device.ejectDevice();
+
+      expect(ok).toBe(true);
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      const [command, args] = execFileMock.mock.calls[0];
+      expect(command).toBe("diskutil");
+      expect(args).toEqual(["eject", "/Volumes/P-6"]);
+    });
+
+    // Volume labels come from the device, so the mount path is attacker
+    // controlled. It must reach execFile as one argv entry and never a shell.
+    // The payload deliberately targets a throwaway path: if a future refactor
+    // reintroduces a shell, this test must not be the thing that does damage.
+    it("passes a hostile volume label through as a single argument", async () => {
+      const hostile = '/Volumes/P-6"; rm -rf /tmp/madeup; echo "';
+      modeDetector.detectMode.mockResolvedValue({
+        mode: "sample_import" as any,
+        confidence: "high",
+        massStorageInfo: { path: hostile, mode: "sample_import" },
+        detectionMethod: "direct",
+        timestamp: new Date(),
+      });
+      const device = makeDevice();
+      await onConnectedCb!(ROLAND_DEVICE);
+
+      await device.ejectDevice();
+
+      const [command, args, third] = execFileMock.mock.calls[0];
+      expect(command).toBe("diskutil");
+      // One argv entry, passed through verbatim — never spliced into a string
+      // and never handed an options object that could re-enable a shell.
+      expect(args).toEqual(["eject", hostile]);
+      expect(command).not.toContain("rm -rf");
+      expect(typeof third).toBe("function");
+    });
+
+    it("reports failure when the volume will not unmount", async () => {
+      execFileMock.mockImplementationOnce((_cmd: any, _args: any, cb: any) =>
+        cb(new Error("Volume in use by another process"))
+      );
+      const device = makeDevice();
+      await onConnectedCb!(ROLAND_DEVICE);
+
+      const ok = await device.ejectDevice();
+
+      expect(ok).toBe(false);
+      // A busy volume must not leave the app claiming the device is gone.
+      expect(device.getStatus().connected).toBe(true);
+    });
+
+    it("still resets state when no volume was ever mounted", async () => {
+      modeDetector.detectMode.mockResolvedValue({
+        mode: "normal" as any,
+        confidence: "high",
+        massStorageInfo: null,
+        detectionMethod: "direct",
+        timestamp: new Date(),
+      });
+      const device = makeDevice();
+      await onConnectedCb!(ROLAND_DEVICE);
+
+      const ok = await device.ejectDevice();
+
+      expect(ok).toBe(true);
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(device.getStatus().connected).toBe(false);
     });
   });
 });

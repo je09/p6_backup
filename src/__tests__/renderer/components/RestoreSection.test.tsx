@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
 import { RestoreSection } from "../../../renderer/components/RestoreSection";
 import { SnackbarProvider } from "../../../renderer/context/SnackbarContext";
 import { DeviceStatus } from "../../../shared/types/index";
@@ -25,7 +25,19 @@ jest.mock("../../../renderer/components/ModeSwitchModal", () => ({
     isOpen ? <div data-testid="mode-switch-modal">{operation}</div> : null,
 }));
 
-// RestoreSelectionModal — expose a button that fires onConfirm with preset selection
+// What the user picked in the selection modal. Tests override it to describe
+// the restore they are exercising; the default is patterns plus one bank.
+const DEFAULT_SELECTION = {
+  includePatterns: true,
+  includeSamples: true,
+  selectedPatterns: [] as string[],
+  selectedSampleBanks: ["A"],
+  selectedSamples: {} as Record<string, string[]>,
+  bankSizes: { A: 0 } as Record<string, number>,
+};
+let mockSelection: any = { ...DEFAULT_SELECTION };
+
+// RestoreSelectionModal — expose a button that fires onConfirm with the selection
 jest.mock("../../../renderer/components/RestoreSelectionModal", () => ({
   RestoreSelectionModal: ({
     isOpen,
@@ -41,16 +53,7 @@ jest.mock("../../../renderer/components/RestoreSelectionModal", () => ({
       <div>
         <button
           data-testid="confirm-patterns-and-samples"
-          onClick={() =>
-            onConfirm({
-              includePatterns: true,
-              includeSamples: true,
-              selectedPatterns: [],
-              selectedSampleBanks: ["A"],
-              selectedSamples: {},
-              bankSizes: { A: 0 },
-            })
-          }
+          onClick={() => onConfirm(mockSelection)}
         >
           Confirm Both
         </button>
@@ -58,6 +61,10 @@ jest.mock("../../../renderer/components/RestoreSelectionModal", () => ({
       </div>
     ) : null,
 }));
+
+beforeEach(() => {
+  mockSelection = { ...DEFAULT_SELECTION };
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -127,7 +134,11 @@ async function openAndConfirmRestore(
   const confirmDialog = screen.getByText("Confirm Restore").closest(
     ".modal-contents"
   ) as HTMLElement;
-  fireEvent.click(within(confirmDialog).getByText("Restore"));
+  // Confirming kicks off the restore, which settles several state updates. Let
+  // them flush inside act so real failures are not buried under act warnings.
+  await act(async () => {
+    fireEvent.click(within(confirmDialog).getByText("Restore"));
+  });
 
   return { rerender };
 }
@@ -279,5 +290,150 @@ describe("RestoreSection — mode check before pending pattern restore", () => {
 
     await waitFor(() => expect(restorePatterns).toHaveBeenCalled());
     expect(screen.queryByTestId("mode-switch-modal")).toBeNull();
+  });
+});
+
+// ─── multi-batch sample restore ───────────────────────────────────────────────
+
+const MB = 1024 * 1024;
+
+/**
+ * The P-6 accepts ~10 MB of samples per import session, so a large restore is
+ * split across power cycles: restore a batch, save on the device, power cycle,
+ * continue. Banks must never be skipped or restored twice across that.
+ */
+describe("RestoreSection — sample restore split across sessions", () => {
+  it("restores only the banks that fit in the first session", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: ["A", "B", "C"],
+      bankSizes: { A: 6 * MB, B: 5 * MB, C: 1 * MB },
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    await openAndConfirmRestore("sample_import", { restoreSamples });
+
+    // A alone is 6 MB; B would take the session over 10 MB.
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(1));
+    expect(restoreSamples.mock.calls[0][1]).toBe("A");
+  });
+
+  it("offers to continue with the banks left over", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: ["A", "B"],
+      bankSizes: { A: 9 * MB, B: 9 * MB },
+    };
+
+    await openAndConfirmRestore("sample_import", {});
+
+    await waitFor(() =>
+      expect(screen.queryByText("Step Complete — More Banks to Restore")).not.toBeNull()
+    );
+  });
+
+  it("restores the remaining banks after the device is power cycled", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: ["A", "B"],
+      bankSizes: { A: 9 * MB, B: 9 * MB },
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    const { rerender } = await openAndConfirmRestore("sample_import", {
+      restoreSamples,
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
+    });
+
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(1));
+    await simulateDeviceCycle(rerender, "sample_import");
+
+    await waitFor(() =>
+      expect(screen.queryByText("Continue Restore (Next Batch)")).not.toBeNull()
+    );
+    fireEvent.click(screen.getByText("Continue Restore (Next Batch)"));
+
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(2));
+    const banksRestored = restoreSamples.mock.calls.map((c: any[]) => c[1]);
+    expect(banksRestored).toEqual(["A", "B"]);
+  });
+
+  it("does not restore a bank twice across sessions", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: ["A", "B", "C"],
+      bankSizes: { A: 9 * MB, B: 9 * MB, C: 9 * MB },
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    const { rerender } = await openAndConfirmRestore("sample_import", {
+      restoreSamples,
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
+    });
+
+    for (let i = 0; i < 2; i++) {
+      await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(i + 1));
+      await simulateDeviceCycle(rerender, "sample_import");
+      await waitFor(() =>
+        expect(screen.queryByText("Continue Restore (Next Batch)")).not.toBeNull()
+      );
+      fireEvent.click(screen.getByText("Continue Restore (Next Batch)"));
+    }
+
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(3));
+    const banksRestored = restoreSamples.mock.calls.map((c: any[]) => c[1]);
+    expect(banksRestored).toEqual(["A", "B", "C"]);
+    expect(new Set(banksRestored).size).toBe(3);
+  });
+
+  it("passes only the selected pads for each bank", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: ["A"],
+      selectedSamples: { A: ["P6_AS1.WAV", "P6_AS2.WAV"] },
+      bankSizes: { A: 1 * MB },
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    await openAndConfirmRestore("sample_import", { restoreSamples });
+
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalled());
+    expect(restoreSamples).toHaveBeenCalledWith(
+      "/backups/backup-2024-01",
+      "A",
+      ["P6_AS1.WAV", "P6_AS2.WAV"]
+    );
+  });
+
+  it("restores every bank when the user selected none explicitly", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: false,
+      selectedSampleBanks: [],
+      bankSizes: {},
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    await openAndConfirmRestore("sample_import", { restoreSamples });
+
+    // Sizes are unknown, so all eight banks ride in one session.
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(8));
+    const banksRestored = restoreSamples.mock.calls.map((c: any[]) => c[1]);
+    expect(banksRestored).toEqual(["A", "B", "C", "D", "E", "F", "G", "H"]);
   });
 });
