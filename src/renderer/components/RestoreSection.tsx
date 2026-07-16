@@ -7,6 +7,10 @@ import {
 import { ModeSwitchModal } from "./ModeSwitchModal";
 import { RestoreSelectionModal } from "./RestoreSelectionModal";
 import { useSnackbar } from "../context/SnackbarContext";
+import {
+  useRestoreOrchestration,
+  RestoreSelection,
+} from "../hooks/useRestoreOrchestration";
 
 interface RestoreSectionProps {
   deviceStatus: DeviceStatus;
@@ -51,39 +55,6 @@ const BackupListItem: React.FC<{
   </div>
 );
 
-export const MAX_SAMPLE_BATCH_BYTES = 10 * 1024 * 1024; // 10 MB hardware limit per session
-
-/**
- * Split a list of bank IDs into sessions where cumulative selected sample size ≤ 10 MB.
- * A bank that alone exceeds the limit occupies its own session.
- *
- * Exported for tests: this encodes a hardware constraint whose edges (a single
- * oversized bank, an exact-limit fit) are worth pinning down directly.
- */
-export function buildBatchesBySize(
-  banks: string[],
-  bankSizes: Record<string, number>,
-): string[][] {
-  const batches: string[][] = [];
-  let currentBatch: string[] = [];
-  let currentSize = 0;
-  for (const bank of banks) {
-    const size = bankSizes[bank] ?? 0;
-    if (
-      currentBatch.length > 0 &&
-      currentSize + size > MAX_SAMPLE_BATCH_BYTES
-    ) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentSize = 0;
-    }
-    currentBatch.push(bank);
-    currentSize += size;
-  }
-  if (currentBatch.length > 0) batches.push(currentBatch);
-  return batches;
-}
-
 export const RestoreSection: React.FC<RestoreSectionProps> = ({
   deviceStatus,
   onRestoreComplete,
@@ -95,58 +66,8 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
   const [sortBy, setSortBy] = useState<"timestamp" | "name" | "type">(
     "timestamp",
   );
-  const [isRestoreInProgress, setIsRestoreInProgress] = useState(false);
-  const [currentOperation, setCurrentOperation] = useState<string>("");
-
-  // Multi-batch sample restore state
-  const [pendingBatches, setPendingBatches] = useState<{
-    batches: string[][];
-    backupPath: string;
-    selectedSamples: { [bankId: string]: string[] };
-  } | null>(null);
-
-  // Pending pattern restore (queued after sample restore in combined flow)
-  const [pendingPatternRestore, setPendingPatternRestore] = useState<{
-    backupPath: string;
-    patternIds: string[];
-  } | null>(null);
-
-  // Pattern restore queued to fire only AFTER all sample batches complete
-  const [queuedPatternRestore, setQueuedPatternRestore] = useState<{
-    backupPath: string;
-    patternIds: string[];
-  } | null>(null);
-
-  // Mode switching state
-  const [showModeSwitchModal, setShowModeSwitchModal] = useState(false);
-  const [modeSwitchDetails, setModeSwitchDetails] = useState<{
-    currentMode: string;
-    requiredMode: string;
-    operation: string;
-    onContinue: () => void;
-  } | null>(null);
-
   // Restore selection modal state
   const [showRestoreSelectionModal, setShowRestoreSelectionModal] =
-    useState(false);
-
-  // Restore complete dialog state
-  const [showRestoreCompleteDialog, setShowRestoreCompleteDialog] =
-    useState(false);
-  const [restoreCompleteMessage, setRestoreCompleteMessage] = useState("");
-
-  // Restore error dialog state
-  const [showRestoreErrorDialog, setShowRestoreErrorDialog] = useState(false);
-  const [restoreErrorMessage, setRestoreErrorMessage] = useState("");
-  // Log of completed restore steps shown near the progress bar
-  const [restoredLog, setRestoredLog] = useState<string[]>([]);
-  // Accumulated message from the samples phase of a combined restore (shown together with patterns result)
-  const [pendingSamplesMessage, setPendingSamplesMessage] = useState<
-    string | null
-  >(null);
-
-  // Track whether device needs to disconnect (power off) before next batch
-  const [requiresDeviceDisconnect, setRequiresDeviceDisconnect] =
     useState(false);
 
   // Rename state
@@ -154,28 +75,29 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
   const [renameValue, setRenameValue] = useState("");
 
   // Overwrite confirmation before restore
-  const [pendingRestoreSelection, setPendingRestoreSelection] = useState<{
-    includePatterns: boolean;
-    includeSamples: boolean;
-    selectedPatterns: string[];
-    selectedSampleBanks: string[];
-    selectedSamples: { [bankId: string]: string[] };
-    bankSizes: Record<string, number>;
-  } | null>(null);
+  const [pendingRestoreSelection, setPendingRestoreSelection] =
+    useState<RestoreSelection | null>(null);
 
   const { showSnackbar } = useSnackbar();
 
-  const showRestoreError = (msg: string) => {
-    setPendingBatches(null);
-    setPendingPatternRestore(null);
-    setQueuedPatternRestore(null);
-    setPendingSamplesMessage(null);
-    setRestoredLog([]);
-    setIsRestoreInProgress(false);
-    setCurrentOperation("");
-    setRestoreErrorMessage(msg);
-    setShowRestoreErrorDialog(true);
-  };
+  const {
+    currentStage,
+    isPendingRestore,
+    remainingBanks,
+    backupPath: restoringPath,
+    isRestoreInProgress,
+    currentOperation,
+    restoredLog,
+    requiresDeviceDisconnect,
+    completeMessage,
+    errorMessage,
+    dismissComplete,
+    dismissError,
+    modeSwitchDetails,
+    cancelModeSwitch,
+    startRestore,
+    continueRestore,
+  } = useRestoreOrchestration({ deviceStatus, onRestoreComplete });
 
   // File copy success event listener
   useEffect(() => {
@@ -196,20 +118,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       window.electronAPI.removeAllListeners("file-copy-success");
     };
   }, []);
-
-  // When device disconnects, clear the disconnect gate so continue buttons re-enable on reconnect
-  useEffect(() => {
-    if (!deviceStatus.connected) {
-      setRequiresDeviceDisconnect(false);
-    }
-  }, [deviceStatus.connected]);
-
-  // Require device power-off between batches / before pattern restore
-  useEffect(() => {
-    if (pendingBatches || pendingPatternRestore) {
-      setRequiresDeviceDisconnect(true);
-    }
-  }, [pendingBatches, pendingPatternRestore]);
 
   // Load available backups
   const loadAvailableBackups = async () => {
@@ -248,17 +156,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     });
   }, [availableBackups, backupFilter, sortBy]);
 
-  // Mode switching handlers
-  const handleModeSwitchCancel = () => {
-    setShowModeSwitchModal(false);
-    setModeSwitchDetails(null);
-  };
-
   const handleModeSwitchContinue = () => {
     if (!modeSwitchDetails) return;
-    setShowModeSwitchModal(false);
-    const onContinue = modeSwitchDetails.onContinue;
-    setModeSwitchDetails(null);
+    const { onContinue } = modeSwitchDetails;
+    cancelModeSwitch();
     onContinue();
   };
 
@@ -301,366 +202,10 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
     if (selectedBackup) setShowRestoreSelectionModal(true);
   };
 
-  const performCustomRestore = async (selection: {
-    includePatterns: boolean;
-    includeSamples: boolean;
-    selectedPatterns: string[];
-    selectedSampleBanks: string[];
-    selectedSamples: { [bankId: string]: string[] };
-    bankSizes: Record<string, number>;
-  }) => {
+  const performCustomRestore = async (selection: RestoreSelection) => {
     if (!selectedBackup) return;
-
-    // Determine which mode is needed for the first restore operation
-    let modeOperation: string | null = null;
-    if (selection.includePatterns && !selection.includeSamples) {
-      modeOperation = "pattern restore";
-    } else if (selection.includeSamples) {
-      // For combined, if already in pattern_import start with patterns; otherwise start with samples
-      if (selection.includePatterns && deviceStatus.mode === "pattern_import") {
-        modeOperation = "pattern restore";
-      } else {
-        modeOperation = "sample restore";
-      }
-    }
-
-    if (modeOperation) {
-      try {
-        const req =
-          await window.electronAPI.checkModeRequirement(modeOperation);
-        if (req) {
-          setShowRestoreSelectionModal(false);
-          setModeSwitchDetails({
-            currentMode: req.currentMode,
-            requiredMode: req.requiredMode,
-            operation: modeOperation,
-            onContinue: () => performCustomRestore(selection),
-          });
-          setShowModeSwitchModal(true);
-          return;
-        }
-      } catch {
-        // fall through — let the individual restore calls surface any mode errors
-      }
-    }
-
-    setIsRestoreInProgress(true);
-    setCurrentOperation("Performing custom restore...");
-    setRestoredLog([]);
     setShowRestoreSelectionModal(false);
-
-    try {
-      let result: RestoreResult = {
-        success: true,
-        message: "",
-        itemCount: 0,
-        timestamp: new Date(),
-      };
-      let patternsQueued = false;
-      let hasMoreBatches = false;
-
-      const patternIds =
-        selection.selectedPatterns.length > 0
-          ? selection.selectedPatterns
-          : undefined;
-      const selectedSamples = selection.selectedSamples ?? {};
-
-      if (selection.includePatterns && selection.includeSamples) {
-        // Combined restore — patterns and samples require different device modes.
-        // Restore whichever matches the current device mode; queue the other.
-        const currentMode = deviceStatus.mode;
-        if (currentMode === "pattern_import") {
-          setCurrentOperation("Restoring patterns...");
-          result = await window.electronAPI.restorePatterns(
-            selectedBackup.path,
-            patternIds,
-          );
-          if (result.success)
-            setRestoredLog((prev) => [
-              ...prev,
-              `Patterns (${result.itemCount})`,
-            ]);
-          // Queue sample restore for after mode switch
-          const banksToRestore =
-            selection.selectedSampleBanks.length > 0
-              ? selection.selectedSampleBanks
-              : ["A", "B", "C", "D", "E", "F", "G", "H"];
-          setPendingBatches({
-            batches: [banksToRestore],
-            backupPath: selectedBackup.path,
-            selectedSamples,
-          });
-        } else {
-          // Assume sample_import mode — restore samples, queue patterns
-          setCurrentOperation("Restoring samples...");
-          const banksToRestore =
-            selection.selectedSampleBanks.length > 0
-              ? selection.selectedSampleBanks
-              : ["A", "B", "C", "D", "E", "F", "G", "H"];
-          const chunks = buildBatchesBySize(
-            banksToRestore,
-            selection.bankSizes,
-          );
-          const firstChunk = chunks[0];
-          const chunkResults = [];
-          for (const bankId of firstChunk) {
-            const bankResult = await window.electronAPI.restoreSamples(
-              selectedBackup.path,
-              bankId,
-              selectedSamples[bankId],
-            );
-            chunkResults.push(bankResult);
-            if (bankResult.success)
-              setRestoredLog((prev) => [
-                ...prev,
-                `Bank ${bankId.toUpperCase()} (${bankResult.itemCount} samples)`,
-              ]);
-          }
-          if (chunks.length > 1) {
-            // More sample batches remain — queue pattern restore to fire after they all finish
-            setPendingBatches({
-              batches: chunks.slice(1),
-              backupPath: selectedBackup.path,
-              selectedSamples,
-            });
-            setQueuedPatternRestore({
-              backupPath: selectedBackup.path,
-              patternIds: selection.selectedPatterns,
-            });
-          } else {
-            // Single chunk — all samples done, promote pattern restore immediately
-            setPendingPatternRestore({
-              backupPath: selectedBackup.path,
-              patternIds: selection.selectedPatterns,
-            });
-          }
-          patternsQueued = true;
-          result = {
-            success: chunkResults.every((r) => r.success),
-            message: chunkResults.every((r) => r.success)
-              ? chunkResults.map((r) => r.message).join("\n")
-              : (chunkResults.find((r) => !r.success)?.message ??
-                "Restore failed"),
-            itemCount: chunkResults.reduce(
-              (sum, r) => sum + (r.itemCount || 0),
-              0,
-            ),
-            timestamp: new Date(),
-          };
-        }
-      } else if (selection.includePatterns) {
-        // Pattern-only restore
-        setCurrentOperation("Restoring selected patterns...");
-        result = await window.electronAPI.restorePatterns(
-          selectedBackup.path,
-          patternIds,
-        );
-      } else if (selection.includeSamples) {
-        // Sample-only restore
-        setCurrentOperation("Restoring selected samples...");
-        const banksToRestore =
-          selection.selectedSampleBanks.length > 0
-            ? selection.selectedSampleBanks
-            : ["A", "B", "C", "D", "E", "F", "G", "H"];
-
-        const chunks = buildBatchesBySize(banksToRestore, selection.bankSizes);
-
-        const firstChunk = chunks[0];
-        const chunkResults = [];
-        for (const bankId of firstChunk) {
-          const bankResult = await window.electronAPI.restoreSamples(
-            selectedBackup.path,
-            bankId,
-            selectedSamples[bankId],
-          );
-          chunkResults.push(bankResult);
-          if (bankResult.success)
-            setRestoredLog((prev) => [
-              ...prev,
-              `Bank ${bankId.toUpperCase()} (${bankResult.itemCount} samples)`,
-            ]);
-        }
-
-        if (chunks.length > 1) {
-          hasMoreBatches = true;
-          setPendingBatches({
-            batches: chunks.slice(1),
-            backupPath: selectedBackup.path,
-            selectedSamples,
-          });
-        }
-
-        result = {
-          success: chunkResults.every((r) => r.success),
-          message: chunkResults.every((r) => r.success)
-            ? chunkResults.map((r) => r.message).join("\n")
-            : (chunkResults.find((r) => !r.success)?.message ??
-              "Restore failed"),
-          itemCount: chunkResults.reduce(
-            (sum, r) => sum + (r.itemCount || 0),
-            0,
-          ),
-          timestamp: new Date(),
-        };
-      }
-
-      onRestoreComplete(result);
-
-      if (result.success) {
-        if (patternsQueued) {
-          // Patterns will follow — store samples message for combined dialog later
-          setPendingSamplesMessage(result.message);
-        } else if (!hasMoreBatches) {
-          // Single-chunk restore: all done, show complete dialog
-          setRestoreCompleteMessage(result.message);
-          setShowRestoreCompleteDialog(true);
-        }
-        // Multi-chunk: more batches remain — pending modal handles the "continue" flow
-      } else {
-        showRestoreError(result.message);
-      }
-    } catch (error: any) {
-      showRestoreError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsRestoreInProgress(false);
-      setCurrentOperation("");
-    }
-  };
-
-  const performPendingPatternRestore = async () => {
-    if (!pendingPatternRestore) return;
-    try {
-      const req =
-        await window.electronAPI.checkModeRequirement("pattern restore");
-      if (req) {
-        setModeSwitchDetails({
-          currentMode: req.currentMode,
-          requiredMode: req.requiredMode,
-          operation: "pattern restore",
-          onContinue: performPendingPatternRestore,
-        });
-        setShowModeSwitchModal(true);
-        return;
-      }
-    } catch {
-      // fall through and let restorePatterns handle it
-    }
-    setIsRestoreInProgress(true);
-    setCurrentOperation("Restoring patterns...");
-    try {
-      const patternIds =
-        pendingPatternRestore.patternIds.length > 0
-          ? pendingPatternRestore.patternIds
-          : undefined;
-      const result = await window.electronAPI.restorePatterns(
-        pendingPatternRestore.backupPath,
-        patternIds,
-      );
-      setPendingPatternRestore(null);
-      if (result.success)
-        setRestoredLog((prev) => [...prev, `Patterns (${result.itemCount})`]);
-      onRestoreComplete(result);
-      if (result.success) {
-        const combinedMessage = pendingSamplesMessage
-          ? `Samples restored:\n${pendingSamplesMessage}\n\nPatterns restored:\n${result.message}`
-          : result.message;
-        setPendingSamplesMessage(null);
-        setRestoreCompleteMessage(combinedMessage);
-        setShowRestoreCompleteDialog(true);
-      } else {
-        showRestoreError(result.message);
-      }
-    } catch (error: any) {
-      showRestoreError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsRestoreInProgress(false);
-      setCurrentOperation("");
-    }
-  };
-
-  const performNextBatchRestore = async () => {
-    if (!pendingBatches) return;
-    try {
-      const req =
-        await window.electronAPI.checkModeRequirement("sample restore");
-      if (req) {
-        setModeSwitchDetails({
-          currentMode: req.currentMode,
-          requiredMode: req.requiredMode,
-          operation: "sample restore",
-          onContinue: performNextBatchRestore,
-        });
-        setShowModeSwitchModal(true);
-        return;
-      }
-    } catch {
-      // fall through and let restoreSamples handle it
-    }
-    const { batches, backupPath, selectedSamples } = pendingBatches;
-    const nextBatch = batches[0];
-    const remaining = batches.slice(1);
-
-    setIsRestoreInProgress(true);
-    setCurrentOperation(`Restoring banks ${nextBatch.join(", ")}...`);
-
-    try {
-      const results = [];
-      for (const bankId of nextBatch) {
-        const bankResult = await window.electronAPI.restoreSamples(
-          backupPath,
-          bankId,
-          selectedSamples[bankId],
-        );
-        results.push(bankResult);
-        if (bankResult.success)
-          setRestoredLog((prev) => [
-            ...prev,
-            `Bank ${bankId.toUpperCase()} (${bankResult.itemCount} samples)`,
-          ]);
-      }
-
-      setPendingBatches(
-        remaining.length > 0
-          ? { batches: remaining, backupPath, selectedSamples }
-          : null,
-      );
-
-      const result: RestoreResult = {
-        success: results.every((r) => r.success),
-        message: results.every((r) => r.success)
-          ? results.map((r) => r.message).join("\n")
-          : (results.find((r) => !r.success)?.message ?? "Restore failed"),
-        itemCount: results.reduce((sum, r) => sum + (r.itemCount || 0), 0),
-        timestamp: new Date(),
-      };
-      onRestoreComplete(result);
-
-      if (result.success) {
-        if (queuedPatternRestore) {
-          // Accumulate samples message — don't show dialog until patterns are done too
-          setPendingSamplesMessage((prev) =>
-            prev ? `${prev}\n${result.message}` : result.message,
-          );
-          if (remaining.length === 0) {
-            // All sample batches done — promote queued pattern restore
-            setPendingPatternRestore(queuedPatternRestore);
-            setQueuedPatternRestore(null);
-          }
-        } else if (remaining.length === 0) {
-          // Last batch — all done
-          setRestoreCompleteMessage(result.message);
-          setShowRestoreCompleteDialog(true);
-        }
-        // More batches remain — pending modal handles the "continue" flow
-      } else {
-        showRestoreError(result.message);
-      }
-    } catch (error: any) {
-      showRestoreError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsRestoreInProgress(false);
-      setCurrentOperation("");
-    }
+    await startRestore(selection, selectedBackup.path);
   };
 
   // Helper functions for formatting backup information
@@ -680,8 +225,6 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
   const formatTimestamp = (timestamp: Date): string => {
     return new Date(timestamp).toLocaleString();
   };
-
-  const isPendingRestore = !!(pendingBatches || pendingPatternRestore);
 
   return (
     <div style={{ display: "contents" }}>
@@ -795,7 +338,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       </p>
                     )}
                   </>
-                ) : pendingPatternRestore ? (
+                ) : currentStage?.kind === "patterns" ? (
                   <>
                     <h1 className="modal-text">
                       Step Complete — Pattern Restore Next
@@ -803,7 +346,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     <p style={{ marginBottom: 4 }}>
                       Restoring:{" "}
                       <strong>
-                        {pendingPatternRestore.backupPath.split("/").pop()}
+                        {restoringPath.split("/").pop()}
                       </strong>
                     </p>
                     <div className="info-box" style={{ margin: "8px 0" }}>
@@ -827,7 +370,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     >
                       <button
                         className="btn btn-default"
-                        onClick={performPendingPatternRestore}
+                        onClick={continueRestore}
                         disabled={
                           isRestoreInProgress ||
                           requiresDeviceDisconnect ||
@@ -840,7 +383,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       </button>
                     </section>
                   </>
-                ) : pendingBatches ? (
+                ) : currentStage?.kind === "samples" ? (
                   <>
                     <h1 className="modal-text">
                       Step Complete — More Banks to Restore
@@ -848,7 +391,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     <p style={{ marginBottom: 4 }}>
                       Restoring:{" "}
                       <strong>
-                        {pendingBatches.backupPath.split("/").pop()}
+                        {restoringPath.split("/").pop()}
                       </strong>
                     </p>
                     <div className="info-box" style={{ margin: "8px 0" }}>
@@ -863,7 +406,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                       <p>
                         Remaining banks to restore:{" "}
                         <strong>
-                          {pendingBatches.batches.flat().join(", ")}
+                          {remainingBanks.join(", ")}
                         </strong>
                       </p>
                     </div>
@@ -878,7 +421,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     >
                       <button
                         className="btn btn-default"
-                        onClick={performNextBatchRestore}
+                        onClick={continueRestore}
                         disabled={
                           isRestoreInProgress ||
                           requiresDeviceDisconnect ||
@@ -899,7 +442,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       )}
 
       {/* Restore Complete Dialog */}
-      {showRestoreCompleteDialog && (
+      {completeMessage !== null && (
         <div className="mac-overlay">
           <div
             className="modal-dialog outer-border"
@@ -915,7 +458,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                     marginBottom: 10,
                   }}
                 >
-                  {restoreCompleteMessage
+                  {completeMessage
                     .split("\n")
                     .filter(Boolean)
                     .map((line, i) => (
@@ -945,11 +488,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
                 >
                   <button
                     className="btn btn-default"
-                    onClick={() => {
-                      setShowRestoreCompleteDialog(false);
-                      setPendingSamplesMessage(null);
-                      setRestoredLog([]);
-                    }}
+                    onClick={dismissComplete}
                   >
                     OK
                   </button>
@@ -961,7 +500,7 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       )}
 
       {/* Restore Error Dialog */}
-      {showRestoreErrorDialog && (
+      {errorMessage !== null && (
         <div className="mac-overlay">
           <div
             className="modal-dialog outer-border"
@@ -970,14 +509,14 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
             <div className="inner-border">
               <div className="modal-contents">
                 <h1 className="modal-text">Restore Failed</h1>
-                <p style={{ marginBottom: 10 }}>{restoreErrorMessage}</p>
+                <p style={{ marginBottom: 10 }}>{errorMessage}</p>
                 <section
                   className="field-row"
                   style={{ justifyContent: "flex-end", marginTop: 12 }}
                 >
                   <button
                     className="btn btn-default"
-                    onClick={() => setShowRestoreErrorDialog(false)}
+                    onClick={dismissError}
                   >
                     OK
                   </button>
@@ -1041,11 +580,11 @@ export const RestoreSection: React.FC<RestoreSectionProps> = ({
       {/* Mode Switch Modal */}
       {modeSwitchDetails && (
         <ModeSwitchModal
-          isOpen={showModeSwitchModal}
+          isOpen={modeSwitchDetails !== null}
           requiredMode={modeSwitchDetails.requiredMode}
           liveMode={deviceStatus.mode ?? "unknown"}
           operation={modeSwitchDetails.operation}
-          onCancel={handleModeSwitchCancel}
+          onCancel={cancelModeSwitch}
           onContinue={handleModeSwitchContinue}
         />
       )}

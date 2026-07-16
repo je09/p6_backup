@@ -7,7 +7,7 @@
 import {
   buildBatchesBySize,
   MAX_SAMPLE_BATCH_BYTES,
-} from "../../../renderer/components/RestoreSection";
+} from "../../../renderer/hooks/useRestoreOrchestration";
 
 const MB = 1024 * 1024;
 

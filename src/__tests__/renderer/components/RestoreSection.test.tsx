@@ -418,6 +418,57 @@ describe("RestoreSection — sample restore split across sessions", () => {
     );
   });
 
+  // A combined restore started while the device is already in pattern_import
+  // does patterns first, then the samples. That path must respect the same
+  // hardware limits and finish at the same point as the samples-first path.
+  it("batches the samples when patterns are restored first", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: true,
+      includeSamples: true,
+      selectedSampleBanks: ["A", "B"],
+      bankSizes: { A: 9 * MB, B: 9 * MB },
+    };
+    const restoreSamples = jest.fn().mockResolvedValue({
+      success: true, message: "ok", itemCount: 2, type: "backup", timestamp: new Date(),
+    });
+
+    const { rerender } = await openAndConfirmRestore("pattern_import", {
+      restoreSamples,
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
+    });
+
+    await simulateDeviceCycle(rerender, "sample_import");
+    await waitFor(() =>
+      expect(screen.queryByText("Continue Restore (Next Batch)")).not.toBeNull()
+    );
+    fireEvent.click(screen.getByText("Continue Restore (Next Batch)"));
+
+    // 18 MB across two banks cannot go in one session.
+    await waitFor(() => expect(restoreSamples).toHaveBeenCalledTimes(1));
+    expect(restoreSamples.mock.calls[0][1]).toBe("A");
+  });
+
+  it("does not announce completion while samples are still pending", async () => {
+    mockSelection = {
+      ...DEFAULT_SELECTION,
+      includePatterns: true,
+      includeSamples: true,
+      selectedSampleBanks: ["A"],
+      bankSizes: { A: 1 * MB },
+    };
+
+    await openAndConfirmRestore("pattern_import", {
+      checkModeRequirement: jest.fn().mockResolvedValue(null),
+    });
+
+    // Patterns are done, but the sample bank has not been restored yet.
+    await waitFor(() =>
+      expect(screen.queryByText("Step Complete — More Banks to Restore")).not.toBeNull()
+    );
+    expect(screen.queryByText("Restore Complete")).toBeNull();
+  });
+
   it("restores every bank when the user selected none explicitly", async () => {
     mockSelection = {
       ...DEFAULT_SELECTION,
