@@ -19,7 +19,12 @@ export const FILE_PATTERNS = {
     WAV_EXTENSION: '.WAV',
     SAMPLE_PREFIX: 'P6_',
     SAMPLE_EXTENSION: '.WAV',
-    SAMPLE_REGEX: /P6_([A-H])S(\d+)\.WAV/i,
+    /**
+     * Sample files as the device writes them: P6_<bank>-<pad>_<name>.WAV,
+     * e.g. P6_A-1_REC.WAV. The trailing name is whatever the sample is called,
+     * and the same stem is reused for the .PRM settings file beside it.
+     */
+    SAMPLE_REGEX: /^P6_([A-H])-([1-6])(?:_(.+))?\.WAV$/i,
     BANK_PREFIX: 'BANK_',
     PAD_PREFIX: 'PAD_',
     BACKUP_FOLDER: 'BACKUP',
@@ -61,6 +66,25 @@ export const DEVICE_DETAILS = {
     UNKNOWN_VERSION: 'Unknown',
     UNKNOWN_DEVICE_ID: 'UNKNOWN'
 } as const;
+
+/**
+ * Which button the user holds at power-on to reach each mode, per the P-6
+ * owner's manual. This is the only place these belong: the same instructions
+ * used to live in four copies that drifted apart, and pattern restore ended up
+ * telling users to hold [SAMPLING] — the button that enters sample import —
+ * leaving them stuck in a mode the app then rejected.
+ *
+ * No two modes may share an instruction; MODE_ENTRY_INSTRUCTIONS is tested for
+ * that, since a duplicate is what the drift looked like.
+ */
+export const MODE_ENTRY_INSTRUCTIONS: Record<string, string> = {
+    pattern_export: 'Hold [ø] while powering on the device',
+    pattern_import: 'Hold [REC] while powering on the device',
+    sample_export:
+        'Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H)',
+    sample_import: 'Hold [SAMPLING] while powering on the device',
+    unknown: 'Please power on the device normally',
+};
 
 export const MASS_STORAGE_MODE_MAP: Record<string, DeviceMode> = {
     'pattern_export': DEVICE_MODES.PATTERN_EXPORT,

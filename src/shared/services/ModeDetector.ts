@@ -1,5 +1,9 @@
 import { DeviceMode } from "../types/index";
-import { DEVICE_MODES, MASS_STORAGE_MODE_MAP } from "../constants/device";
+import {
+  DEVICE_MODES,
+  MASS_STORAGE_MODE_MAP,
+  MODE_ENTRY_INSTRUCTIONS,
+} from "../constants/device";
 import { UsbDeviceManager, type P6MassStorageInfo } from "./UsbDeviceManager";
 import { createComponentLogger } from "./Logger";
 
@@ -144,32 +148,22 @@ export class ModeDetector {
   getModeInstructions(mode: DeviceMode): string[] {
     const instructions: Record<DeviceMode, string[]> = {
       pattern: [
-        "Hold [ø] while powering on = Pattern backup mode",
-        "Hold [SAMPLING] while powering on = Pattern restore / sample import mode",
+        MODE_ENTRY_INSTRUCTIONS.pattern_export + " = Pattern backup mode",
+        MODE_ENTRY_INSTRUCTIONS.pattern_import + " = Pattern restore mode",
       ],
-      pattern_export: [
-        "Hold [ø] while powering on to enter pattern backup mode",
-      ],
-      pattern_import: [
-        "Hold [SAMPLING] while powering on to enter pattern restore mode",
-      ],
+      pattern_export: [MODE_ENTRY_INSTRUCTIONS.pattern_export],
+      pattern_import: [MODE_ENTRY_INSTRUCTIONS.pattern_import],
       sample: [
-        "Hold bank buttons [A/E]–[D/H] while powering on = Sample export (banks A–D)",
-        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on = Sample export (banks E–H)",
-        "Hold [SAMPLING] while powering on = Sample import mode",
+        MODE_ENTRY_INSTRUCTIONS.sample_export + " = Sample export mode",
+        MODE_ENTRY_INSTRUCTIONS.sample_import + " = Sample import mode",
       ],
-      sample_export: [
-        "Hold bank buttons [A/E]–[D/H] while powering on to export banks A–D",
-        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on to export banks E–H",
-      ],
-      sample_import: [
-        "Hold [SAMPLING] while powering on to enter sample import mode",
-      ],
+      sample_export: [MODE_ENTRY_INSTRUCTIONS.sample_export],
+      sample_import: [MODE_ENTRY_INSTRUCTIONS.sample_import],
       normal: [
-        "Hold [ø] while powering on = Pattern backup mode",
-        "Hold [SAMPLING] while powering on = Pattern restore / sample import mode",
-        "Hold bank buttons [A/E]–[D/H] while powering on = Sample export (banks A–D)",
-        "Hold [SAMPLING] + bank buttons [A/E]–[D/H] while powering on = Sample export (banks E–H)",
+        MODE_ENTRY_INSTRUCTIONS.pattern_export + " = Pattern backup mode",
+        MODE_ENTRY_INSTRUCTIONS.pattern_import + " = Pattern restore mode",
+        MODE_ENTRY_INSTRUCTIONS.sample_export + " = Sample export mode",
+        MODE_ENTRY_INSTRUCTIONS.sample_import + " = Sample import mode",
       ],
       unknown: [
         "Please power on the device normally",

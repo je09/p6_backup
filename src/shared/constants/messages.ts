@@ -376,7 +376,7 @@ export const UI_LABELS = {
 
   // Mode instructions
   MODE_INSTRUCTION_PATTERN:
-    "Hold [ø] while powering on for pattern backup. Hold [SAMPLING] while powering on for pattern restore.",
+    "Hold [ø] while powering on for pattern backup. Hold [REC] while powering on for pattern restore.",
   MODE_INSTRUCTION_SAMPLE:
     "Hold bank buttons [A/E]–[D/H] while powering on for sample export. Hold [SAMPLING] while powering on for sample import.",
   MODE_INSTRUCTION_DEFAULT: (mode: string) => `Switch your P6 to ${mode} mode.`,

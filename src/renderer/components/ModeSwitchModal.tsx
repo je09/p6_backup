@@ -1,5 +1,5 @@
 import React from "react";
-import { UI_LABELS } from "../../shared/constants";
+import { UI_LABELS, MODE_ENTRY_INSTRUCTIONS } from "../../shared/constants";
 
 interface ModeSwitchModalProps {
   isOpen: boolean;
@@ -21,12 +21,9 @@ const MODE_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const MODE_INSTRUCTIONS: Record<string, string> = {
-  pattern_export: "Hold [ø] while powering on the device.",
-  pattern_import: "Hold [SAMPLING] while powering on the device.",
-  sample_export:  "Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H).",
-  sample_import:  "Hold [SAMPLING] while powering on the device.",
-  pattern:        UI_LABELS.MODE_INSTRUCTION_PATTERN,
-  sample:         UI_LABELS.MODE_INSTRUCTION_SAMPLE,
+  ...MODE_ENTRY_INSTRUCTIONS,
+  pattern: UI_LABELS.MODE_INSTRUCTION_PATTERN,
+  sample:  UI_LABELS.MODE_INSTRUCTION_SAMPLE,
 };
 
 const getModeDisplayName = (mode: string): string =>

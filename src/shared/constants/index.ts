@@ -2,6 +2,8 @@
 export * from "./messages";
 export * from "./device";
 
+import { MODE_ENTRY_INSTRUCTIONS } from "./device";
+
 // Note: LOG_MESSAGES is exported separately to avoid naming conflicts
 export { LOG_MESSAGES } from "./log";
 
@@ -14,17 +16,14 @@ export const DEVICE_CONSTANTS = {
   AUTO_DETECTION_INTERVAL: 8000, // 8 seconds
   RECONNECTION_DELAY: 1000, // 1 second delay for reconnection
 
+  // Sourced from MODE_ENTRY_INSTRUCTIONS so there is one statement of which
+  // button reaches which mode.
   MODE_INSTRUCTIONS: {
     pattern:
-      "For pattern backup: Hold [ø] while powering on. For pattern restore: Hold [SAMPLING] while powering on.",
+      "For pattern backup: Hold [ø] while powering on. For pattern restore: Hold [REC] while powering on.",
     sample:
       "For sample export: Hold bank buttons [A/E]–[D/H] while powering on (+ [SAMPLING] for banks E–H). For sample import: Hold [SAMPLING] while powering on.",
-    pattern_export: "Hold [ø] while powering on the device",
-    pattern_import: "Hold [SAMPLING] while powering on the device",
-    sample_export:
-      "Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H)",
-    sample_import: "Hold [SAMPLING] while powering on the device",
-    unknown: "Please power on the device normally",
+    ...MODE_ENTRY_INSTRUCTIONS,
   } as Record<string, string>,
 
   MODE_DESCRIPTIONS: {
