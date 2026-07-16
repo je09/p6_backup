@@ -60,7 +60,7 @@ class MainApplication {
         ? path.join(__dirname, "../assets/app.icns")
         : process.platform === "win32"
           ? path.join(__dirname, "../assets/icon.png")
-          : path.join(__dirname, "../assets/icons/icon-512.png");
+          : path.join(__dirname, "../assets/icons/512x512.png");
     const isDebugging = this.isDebugMode();
     this.mainWindow = new BrowserWindow({
       height: 580,

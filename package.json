@@ -87,6 +87,7 @@
     },
     "linux": {
       "icon": "assets/icons/",
+      "category": "Utility",
       "target": [
         {
           "target": "AppImage",
