@@ -1,100 +1,72 @@
 import { contextBridge, ipcRenderer } from "electron";
+import { IPC, IPC_EVENTS } from "../shared/constants";
+import type { BackupStageResult } from "../shared/types/index";
 
-// Expose protected methods that allow the renderer process to use
-// the ipcRenderer without exposing the entire object
+/**
+ * The renderer's entire view of the main process. Anything not exposed here is
+ * unreachable from the page — see src/declarations.d.ts for the typed shape.
+ */
 contextBridge.exposeInMainWorld("electronAPI", {
-  // Backup Operations (staging steps used by orchestration)
+  // Backup — the staging steps a multi-stage run drives, then the gather.
   backupPatterns: (customName?: string, patternIds?: string[]) =>
-    ipcRenderer.invoke("backup:patterns", customName, patternIds),
+    ipcRenderer.invoke(IPC.BACKUP_PATTERNS, customName, patternIds),
   backupSamples: (bankId?: string, customName?: string, padNumbers?: number[]) =>
-    ipcRenderer.invoke("backup:samples", bankId, customName, padNumbers),
-  backup: (options: {
-    includePatterns?: boolean;
-    includeSamples?: boolean;
-    bankIds?: string[];
-    customName?: string;
-  }) => ipcRenderer.invoke("backup:create", options),
+    ipcRenderer.invoke(IPC.BACKUP_SAMPLES, bankId, customName, padNumbers),
   organizeBackup: (options: {
-    includePatterns?: boolean;
-    includeSamples?: boolean;
-    bankIds?: string[];
-    precompletedResults?: any[];
+    precompletedResults?: BackupStageResult[];
     customName?: string;
-  }) => ipcRenderer.invoke("backup:organize", options),
+  }) => ipcRenderer.invoke(IPC.BACKUP_ORGANIZE, options),
 
-  // Restore Operations
+  // Restore
   restorePatterns: (backupPath: string, patternIds?: string[]) =>
-    ipcRenderer.invoke("restore:patterns", backupPath, patternIds),
+    ipcRenderer.invoke(IPC.RESTORE_PATTERNS, backupPath, patternIds),
   restoreSamples: (backupPath: string, bankId?: string, sampleNames?: string[]) =>
-    ipcRenderer.invoke("restore:samples", backupPath, bankId, sampleNames),
+    ipcRenderer.invoke(IPC.RESTORE_SAMPLES, backupPath, bankId, sampleNames),
 
-  // Device Operations
-  detectDevice: () => ipcRenderer.invoke("device:detect"),
-  getDeviceStatus: () => ipcRenderer.invoke("device:getStatus"),
-  getCurrentBanks: () => ipcRenderer.invoke("device:getCurrentBanks"),
-  getCurrentBank: () => ipcRenderer.invoke("device:getCurrentBank"),
-  getCurrentPatterns: () => ipcRenderer.invoke("device:getCurrentPatterns"),
-  hasBankInfo: () => ipcRenderer.invoke("device:hasBankInfo"),
-  getCurrentMode: () => ipcRenderer.invoke("device:getCurrentMode"),
+  // Device
+  detectDevice: () => ipcRenderer.invoke(IPC.DEVICE_DETECT),
+  getDeviceStatus: () => ipcRenderer.invoke(IPC.DEVICE_GET_STATUS),
+  getCurrentBanks: () => ipcRenderer.invoke(IPC.DEVICE_GET_CURRENT_BANKS),
+  getCurrentBank: () => ipcRenderer.invoke(IPC.DEVICE_GET_CURRENT_BANK),
+  getCurrentPatterns: () => ipcRenderer.invoke(IPC.DEVICE_GET_CURRENT_PATTERNS),
+  hasBankInfo: () => ipcRenderer.invoke(IPC.DEVICE_HAS_BANK_INFO),
   checkModeRequirement: (operation: string) =>
-    ipcRenderer.invoke("device:checkModeRequirement", operation),
-  waitForMode: (requiredMode: string, timeoutMs?: number) =>
-    ipcRenderer.invoke("device:waitForMode", requiredMode, timeoutMs),
-  ejectDevice: () => ipcRenderer.invoke("device:eject"),
-  retryModeDetection: () => ipcRenderer.invoke("device:retryModeDetection"),
+    ipcRenderer.invoke(IPC.DEVICE_CHECK_MODE_REQUIREMENT, operation),
+  ejectDevice: () => ipcRenderer.invoke(IPC.DEVICE_EJECT),
+  retryModeDetection: () => ipcRenderer.invoke(IPC.DEVICE_RETRY_MODE_DETECTION),
 
-  // File System Operations
-  selectBackupLocation: () => ipcRenderer.invoke("fs:selectBackupLocation"),
-  selectRestoreFile: () => ipcRenderer.invoke("fs:selectRestoreFile"),
-  discoverBackups: () => ipcRenderer.invoke("fs:discoverBackups"),
+  // File system
+  selectBackupLocation: () => ipcRenderer.invoke(IPC.FS_SELECT_BACKUP_LOCATION),
+  discoverBackups: () => ipcRenderer.invoke(IPC.FS_DISCOVER_BACKUPS),
   getBackupDetails: (backupPath: string) =>
-    ipcRenderer.invoke("fs:getBackupDetails", backupPath),
+    ipcRenderer.invoke(IPC.FS_GET_BACKUP_DETAILS, backupPath),
   renameBackup: (backupPath: string, newName: string) =>
-    ipcRenderer.invoke("fs:renameBackup", backupPath, newName),
-  getBackupPath: () => ipcRenderer.invoke("fs:getBackupPath"),
-  setBackupPath: (newPath: string) => ipcRenderer.invoke("fs:setBackupPath", newPath),
+    ipcRenderer.invoke(IPC.FS_RENAME_BACKUP, backupPath, newName),
+  getBackupPath: () => ipcRenderer.invoke(IPC.FS_GET_BACKUP_PATH),
+  setBackupPath: (newPath: string) =>
+    ipcRenderer.invoke(IPC.FS_SET_BACKUP_PATH, newPath),
 
-  // Event Listeners
-  onDeviceStatusChanged: (callback: (status: any) => void) => {
-    ipcRenderer.on("device:status-changed", (_, status) => callback(status));
-  },
-
-  onMenuAction: (action: string, callback: () => void) => {
-    ipcRenderer.on(`menu:${action}`, callback);
-  },
-
-  onNavigate: (callback: (view: string) => void) => {
-    ipcRenderer.on("menu:navigate", (_, view) => callback(view));
-  },
-
-  // Menu-specific event handlers
-  onMenuNewBackup: (callback: () => void) => {
-    ipcRenderer.on("menu:new-backup", callback);
-  },
-
-  // File copy success event listener
+  // Events pushed from main
+  onDeviceStatusChanged: (callback: (status: unknown) => void) =>
+    ipcRenderer.on(IPC_EVENTS.DEVICE_STATUS_CHANGED, (_, status) =>
+      callback(status)
+    ),
+  onNavigate: (callback: (view: string) => void) =>
+    ipcRenderer.on(IPC_EVENTS.MENU_NAVIGATE, (_, view) => callback(view)),
+  onMenuNewBackup: (callback: () => void) =>
+    ipcRenderer.on(IPC_EVENTS.MENU_NEW_BACKUP, () => callback()),
   onFileCopySuccess: (
     callback: (data: { fileName: string; message: string }) => void
-  ) => {
-    ipcRenderer.on("file-copy-success", (_, data) => callback(data));
-  },
-
-  // Remove listeners
-  removeAllListeners: (channel: string) => {
-    ipcRenderer.removeAllListeners(channel);
-  },
+  ) => ipcRenderer.on(IPC_EVENTS.FILE_COPY_SUCCESS, (_, data) => callback(data)),
+  removeAllListeners: (channel: string) =>
+    ipcRenderer.removeAllListeners(channel),
 
   // Window controls
-  windowClose: () => ipcRenderer.invoke("window:close"),
-  windowMinimize: () => ipcRenderer.invoke("window:minimize"),
+  windowClose: () => ipcRenderer.invoke(IPC.WINDOW_CLOSE),
+  windowMinimize: () => ipcRenderer.invoke(IPC.WINDOW_MINIMIZE),
 
   // Logging
-  sendLog: (logEntry: any) => ipcRenderer.invoke("log:write", logEntry),
-  getLogLevel: () => ipcRenderer.invoke("log:getLevel"),
-  setLogLevel: (level: number) => ipcRenderer.invoke("log:setLevel", level),
-  getLogDirectory: () => ipcRenderer.invoke("log:getDirectory"),
-  getLogFiles: () => ipcRenderer.invoke("log:getFiles"),
-  clearLogs: () => ipcRenderer.invoke("log:clear"),
+  sendLog: (entry: Record<string, unknown>) =>
+    ipcRenderer.invoke(IPC.LOG_WRITE, entry),
+  getLogLevel: () => ipcRenderer.invoke(IPC.LOG_GET_LEVEL),
 });
-
-// Window.electronAPI type is declared in src/declarations.d.ts (shared with renderer)

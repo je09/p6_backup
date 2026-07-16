@@ -2,10 +2,41 @@ const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 
+/**
+ * The preload runs sandboxed, where `require` resolves only electron and a few
+ * built-ins — never a relative path. It therefore has to be bundled into one
+ * self-contained file, or its imports throw and nothing reaches `window`.
+ */
+const preloadConfig = (isProduction) => ({
+  name: "preload",
+  entry: "./src/main/preload.ts",
+  target: "electron-preload",
+  output: {
+    path: path.resolve(__dirname, "dist", "main"),
+    filename: "preload.js",
+  },
+  resolve: { extensions: [".ts", ".js"] },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        use: {
+          loader: "ts-loader",
+          options: { configFile: "tsconfig.preload.json" },
+        },
+        exclude: /node_modules/,
+      },
+    ],
+  },
+  devtool: isProduction ? "source-map" : "eval-source-map",
+  mode: isProduction ? "production" : "development",
+});
+
 module.exports = (env, argv) => {
   const isProduction = argv.mode === "production";
 
-  return {
+  const rendererConfig = {
+    name: "renderer",
     entry: "./src/renderer/index.tsx",
     target: "electron-renderer",
     output: {
@@ -23,7 +54,12 @@ module.exports = (env, argv) => {
       rules: [
         {
           test: /\.tsx?$/,
-          use: "ts-loader",
+          // Without an explicit config, ts-loader falls back to tsconfig.json,
+          // whose src/**/* glob pulls the tests into the shipped bundle.
+          use: {
+            loader: "ts-loader",
+            options: { configFile: "tsconfig.renderer.json" },
+          },
           exclude: /node_modules/,
         },
         {
@@ -66,4 +102,6 @@ module.exports = (env, argv) => {
     devtool: isProduction ? "source-map" : "eval-source-map",
     mode: argv.mode || "development",
   };
+
+  return [rendererConfig, preloadConfig(isProduction)];
 };

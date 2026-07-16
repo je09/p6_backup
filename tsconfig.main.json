@@ -9,5 +9,9 @@
         "src/main/**/*",
         "src/shared/**/*",
         "src/declarations.d.ts"
+    ],
+    // The preload is bundled by webpack instead — see tsconfig.preload.json.
+    "exclude": [
+        "src/main/preload.ts"
     ]
 }
