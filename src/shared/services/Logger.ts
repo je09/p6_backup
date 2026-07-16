@@ -11,15 +11,6 @@ export enum LogLevel {
   FATAL = 4,
 }
 
-interface LogEntry {
-  timestamp: string;
-  level: string;
-  component: string;
-  message: string;
-  data?: any;
-  stack?: string;
-}
-
 class Logger {
   private static instance: Logger;
   private logLevel: LogLevel = LogLevel.INFO;

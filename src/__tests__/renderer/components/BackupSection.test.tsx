@@ -32,17 +32,14 @@ jest.mock("../../../renderer/components/BackupProgressCard", () => ({
 // Stub BackupOptions — selecting patterns also sets selectedPatterns so deps are computed
 jest.mock("../../../renderer/components/BackupOptions", () => ({
   BackupOptions: ({
-    setIncludePatterns,
     setSelectedPatterns,
   }: {
-    setIncludePatterns: (v: boolean) => void;
     setSelectedPatterns: (v: string[]) => void;
   }) => (
     <div>
       <button
         data-testid="toggle-patterns"
         onClick={() => {
-          setIncludePatterns(true);
           // Select the pattern returned by getCurrentPatterns mock (id "1-1")
           setSelectedPatterns(["1-1"]);
         }}

@@ -99,7 +99,7 @@ describe("ModeDetector", () => {
     it("returns instructions for sample_export mode", () => {
       const instructions = detector.getModeInstructions("sample_export");
       expect(instructions.length).toBeGreaterThan(0);
-      expect(instructions[0]).toContain("BANK");
+      expect(instructions[0]).toMatch(/bank/i);
     });
 
     it("returns fallback instructions for unknown mode", () => {

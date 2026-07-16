@@ -80,14 +80,19 @@ describe("startBackup", () => {
     expect(result.current.backupMode).toBe("samples");
   });
 
-  it("throws when initialMode is samples but queue is empty", () => {
-    const { result } = renderHook(() => useBackupOrchestration(makeProps()));
+  it("reports an error and skips the guide when initialMode is samples but queue is empty", () => {
+    const props = makeProps();
+    const { result } = renderHook(() => useBackupOrchestration(props));
 
-    expect(() => {
-      act(() => {
-        result.current.startBackup([], "samples");
-      });
-    }).toThrow("No banks selected");
+    act(() => {
+      result.current.startBackup([], "samples");
+    });
+
+    expect(props.showSnackbar).toHaveBeenCalledWith(
+      "No banks selected for backup",
+      "error"
+    );
+    expect(result.current.showBackupGuide).toBe(false);
   });
 });
 

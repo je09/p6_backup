@@ -24,7 +24,6 @@ export const BankSwitchingGuide: React.FC<BankSwitchingGuideProps> = ({
   const [showCountdown, setShowCountdown] = useState(false);
 
   const currentBank = targetBanks[currentBankIndex];
-  const isLastBank = currentBankIndex === totalBanks - 1;
 
   useEffect(() => {
     if (showCountdown && countdown > 0) {

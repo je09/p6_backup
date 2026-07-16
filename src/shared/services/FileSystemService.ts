@@ -1,6 +1,8 @@
 import * as fs from "fs/promises";
+import { createReadStream, createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
 import * as path from "path";
-import { app, shell } from "electron";
+import { shell } from "electron";
 import * as os from "os";
 import { SUCCESS_MESSAGES } from "../constants/messages";
 import { createComponentLogger } from "./Logger";
@@ -138,21 +140,14 @@ export class FileSystemService {
     sourcePath: string,
     destinationPath: string
   ): Promise<void> {
-    const {
-      createReadStream,
-      createWriteStream,
-      promises: fsPromises,
-    } = require("fs");
-    const { pipeline } = require("stream/promises");
-
     try {
-      const stats = await fsPromises.stat(sourcePath);
+      const stats = await fs.stat(sourcePath);
       if (stats.isDirectory()) {
         throw new Error(`EISDIR: illegal operation on a directory, read`);
       }
 
       const destinationDir = path.dirname(destinationPath);
-      await fsPromises.mkdir(destinationDir, { recursive: true });
+      await fs.mkdir(destinationDir, { recursive: true });
 
       const readStream = createReadStream(sourcePath);
       const writeStream = createWriteStream(destinationPath);

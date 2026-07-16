@@ -56,7 +56,6 @@ export class BackupDiscoveryService {
       };
 
       let patternsFile = path.join(backupPath, "patterns.json");
-      let patternsFound = false;
 
       const rootPatternsData = await this.fs.readJsonFile(patternsFile, true);
       if (rootPatternsData && Array.isArray(rootPatternsData)) {
@@ -75,7 +74,6 @@ export class BackupDiscoveryService {
           (sum: number, p: any) => sum + p.size,
           0
         );
-        patternsFound = true;
       } else {
         patternsFile = path.join(backupPath, "patterns", "patterns.json");
         const nestedPatternsData = await this.fs.readJsonFile(
@@ -98,7 +96,6 @@ export class BackupDiscoveryService {
             (sum: number, p: any) => sum + p.size,
             0
           );
-          patternsFound = true;
         } else {
           this.logger.debug(
             "No patterns.json found in root or patterns folder"

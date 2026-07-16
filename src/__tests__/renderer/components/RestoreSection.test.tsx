@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { RestoreSection } from "../../../renderer/components/RestoreSection";
 import { SnackbarProvider } from "../../../renderer/context/SnackbarContext";
 import { DeviceStatus } from "../../../shared/types/index";
@@ -31,7 +31,6 @@ jest.mock("../../../renderer/components/RestoreSelectionModal", () => ({
     isOpen,
     onConfirm,
     onCancel,
-    selection,
   }: {
     isOpen: boolean;
     onConfirm: (s: any) => void;
@@ -122,6 +121,13 @@ async function openAndConfirmRestore(
   fireEvent.dblClick(screen.getByText("backup-2024-01"));
   await waitFor(() => expect(screen.queryByTestId("confirm-patterns-and-samples")).not.toBeNull());
   fireEvent.click(screen.getByTestId("confirm-patterns-and-samples"));
+
+  // Selecting content raises an overwrite confirmation before anything is written.
+  await waitFor(() => expect(screen.queryByText("Confirm Restore")).not.toBeNull());
+  const confirmDialog = screen.getByText("Confirm Restore").closest(
+    ".modal-contents"
+  ) as HTMLElement;
+  fireEvent.click(within(confirmDialog).getByText("Restore"));
 
   return { rerender };
 }
