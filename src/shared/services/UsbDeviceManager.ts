@@ -256,10 +256,12 @@ export class UsbDeviceManager {
           const stat = await fsPromises.stat(devicePath);
           if (stat.isDirectory()) {
             const contents = await fsPromises.readdir(devicePath);
+            // A BACKUP folder means the device exports patterns to us; a
+            // RESTORE folder means it imports them from us.
             if (contents.includes("BACKUP"))
-              return { path: devicePath, mode: "pattern_backup" };
+              return { path: devicePath, mode: "pattern_export" };
             if (contents.includes("RESTORE"))
-              return { path: devicePath, mode: "pattern_restore" };
+              return { path: devicePath, mode: "pattern_import" };
             if (contents.includes("EXPORT")) {
               try {
                 const exportPath = path.join(devicePath, "EXPORT");

@@ -63,13 +63,11 @@ export const DEVICE_DETAILS = {
 } as const;
 
 export const MASS_STORAGE_MODE_MAP: Record<string, DeviceMode> = {
-    'pattern_backup': 'pattern_export',
-    'pattern_restore': 'pattern_import',
-    'sample_export': 'sample_export',
-    'sample_import': 'sample_import',
-    'pattern_export': 'pattern_export',
-    'pattern_import': 'pattern_import',
-    'normal': 'normal' as DeviceMode,
+    'pattern_export': DEVICE_MODES.PATTERN_EXPORT,
+    'pattern_import': DEVICE_MODES.PATTERN_IMPORT,
+    'sample_export': DEVICE_MODES.SAMPLE_EXPORT,
+    'sample_import': DEVICE_MODES.SAMPLE_IMPORT,
+    'normal': DEVICE_MODES.NORMAL,
     'unknown': DEVICE_MODES.UNKNOWN,
 };
 

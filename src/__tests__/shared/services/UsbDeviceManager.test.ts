@@ -32,22 +32,22 @@ describe("UsbDeviceManager.checkP6MassStorageMode", () => {
     expect(result).toBeNull();
   });
 
-  it("returns pattern_backup mode when BACKUP folder is present", async () => {
+  it("returns pattern_export mode when BACKUP folder is present", async () => {
     statSpy.mockResolvedValue({ isDirectory: () => true } as any);
     readdirSpy.mockResolvedValue(["BACKUP"] as any);
 
     const result = await manager.checkP6MassStorageMode();
     expect(result).not.toBeNull();
-    expect(result!.mode).toBe("pattern_backup");
+    expect(result!.mode).toBe("pattern_export");
     expect(result!.path).toBe("/Volumes/P-6");
   });
 
-  it("returns pattern_restore mode when RESTORE folder is present", async () => {
+  it("returns pattern_import mode when RESTORE folder is present", async () => {
     statSpy.mockResolvedValue({ isDirectory: () => true } as any);
     readdirSpy.mockResolvedValue(["RESTORE"] as any);
 
     const result = await manager.checkP6MassStorageMode();
-    expect(result!.mode).toBe("pattern_restore");
+    expect(result!.mode).toBe("pattern_import");
   });
 
   it("returns sample_export mode when EXPORT folder with banks containing PADs is present", async () => {
@@ -89,7 +89,7 @@ describe("UsbDeviceManager.checkP6MassStorageMode", () => {
     readdirSpy.mockResolvedValue(["BACKUP", "RESTORE"] as any);
 
     const result = await manager.checkP6MassStorageMode();
-    expect(result!.mode).toBe("pattern_backup");
+    expect(result!.mode).toBe("pattern_export");
   });
 
   it("returns unknown mode when path exists but has no recognised folders", async () => {

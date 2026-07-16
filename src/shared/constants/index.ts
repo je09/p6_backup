@@ -19,8 +19,8 @@ export const DEVICE_CONSTANTS = {
       "For pattern backup: Hold [ø] while powering on. For pattern restore: Hold [SAMPLING] while powering on.",
     sample:
       "For sample export: Hold bank buttons [A/E]–[D/H] while powering on (+ [SAMPLING] for banks E–H). For sample import: Hold [SAMPLING] while powering on.",
-    pattern_backup: "Hold [ø] while powering on the device",
-    pattern_restore: "Hold [SAMPLING] while powering on the device",
+    pattern_export: "Hold [ø] while powering on the device",
+    pattern_import: "Hold [SAMPLING] while powering on the device",
     sample_export:
       "Hold bank buttons [A/E]–[D/H] while powering on (also hold [SAMPLING] for banks E–H)",
     sample_import: "Hold [SAMPLING] while powering on the device",
@@ -30,9 +30,9 @@ export const DEVICE_CONSTANTS = {
   MODE_DESCRIPTIONS: {
     pattern: "Pattern Mode - Ready for pattern backup/restore operations",
     sample: "Sample Mode - Ready for sample backup/restore operations",
-    pattern_backup:
+    pattern_export:
       "Pattern Backup Mode - Device has BACKUP folder for exporting patterns",
-    pattern_restore:
+    pattern_import:
       "Pattern Restore Mode - Device has RESTORE folder for importing patterns",
     sample_export:
       "Sample Export Mode - Device has EXPORT folder with BANK_<letter> folders for exporting samples",

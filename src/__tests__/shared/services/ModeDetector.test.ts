@@ -37,7 +37,7 @@ describe("ModeDetector", () => {
     it("returns pattern_export when device has BACKUP folder", async () => {
       usbManager.checkP6MassStorageMode.mockResolvedValue({
         path: "/Volumes/P-6",
-        mode: "pattern_backup",
+        mode: "pattern_export",
       });
       const result = await detector.detectModeQuick();
       expect(result.mode).toBe("pattern_export");
@@ -47,7 +47,7 @@ describe("ModeDetector", () => {
     it("returns pattern_import when device has RESTORE folder", async () => {
       usbManager.checkP6MassStorageMode.mockResolvedValue({
         path: "/Volumes/P-6",
-        mode: "pattern_restore",
+        mode: "pattern_import",
       });
       const result = await detector.detectModeQuick();
       expect(result.mode).toBe("pattern_import");
@@ -74,7 +74,7 @@ describe("ModeDetector", () => {
     });
 
     it("stores massStorageInfo in the result", async () => {
-      const info = { path: "/Volumes/P-6", mode: "pattern_backup", banks: ["A"] };
+      const info = { path: "/Volumes/P-6", mode: "pattern_export", banks: ["A"] };
       usbManager.checkP6MassStorageMode.mockResolvedValue(info);
       const result = await detector.detectModeQuick();
       expect(result.massStorageInfo).toBe(info);
