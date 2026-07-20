@@ -1,7 +1,7 @@
 {
   "name": "roland-p6-backup-tool",
   "version": "0.7.4",
-  "description": "A desktop application for backing up and restoring Roland P6 patterns and samples",
+  "description": "An app for backing up and restoring Roland AIRA P-6 patterns and samples",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.main.json && webpack --mode production",
@@ -30,6 +30,14 @@
   ],
   "author": "je09",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/je09/P6BackupTool.git"
+  },
+  "homepage": "https://github.com/je09/P6BackupTool#readme",
+  "bugs": {
+    "url": "https://github.com/je09/P6BackupTool/issues"
+  },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
