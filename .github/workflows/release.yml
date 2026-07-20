@@ -42,7 +42,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm test -- --runInBand
+      # Device-mode tests simulate macOS volume mounts under /Volumes.
+      - if: matrix.os == 'macos-13'
+        run: npm test -- --runInBand
       - run: npm run build
       - run: npm run package -- --publish never
 
