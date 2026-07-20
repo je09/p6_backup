@@ -1,5 +1,15 @@
 # P6 Backup Tool
 
+[![Release](https://img.shields.io/github/v/release/je09/P6BackupTool?display_name=tag&sort=semver)](https://github.com/je09/P6BackupTool/releases)
+[![Release workflow](https://github.com/je09/P6BackupTool/actions/workflows/release.yml/badge.svg)](https://github.com/je09/P6BackupTool/actions/workflows/release.yml)
+[![License](https://img.shields.io/github/license/je09/P6BackupTool)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/je09/P6BackupTool/total)](https://github.com/je09/P6BackupTool/releases)
+
+![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555)
+
 Junky, System 6-inspired backup tool for the Roland AIRA P-6 sampler.
 
 ## Why this exists
