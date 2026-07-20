@@ -1,6 +1,6 @@
 {
   "name": "roland-p6-backup-tool",
-  "version": "0.7.4",
+  "version": "1.0.0",
   "description": "An app for backing up and restoring Roland AIRA P-6 patterns and samples",
   "main": "dist/main/main.js",
   "scripts": {
